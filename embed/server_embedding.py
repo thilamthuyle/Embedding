@@ -24,20 +24,6 @@ import subprocess
 import requests
 
 
-MODEL_NAMES = {
-    "TEI": [
-        "multilingual-e5-large-instruct",
-        # "UAE-Large-V1",
-    ],
-    "sentence_transformer": [
-        # "SBERT-bert-base-spanish-wwm-uncased",
-        # "LaBSE",
-        # "sentence-camembert-large",  # fr
-    ],
-    "huggingface": [],
-    "pytorch": [],
-}
-
 # Configure root logger to handle INFO messages
 # logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 
@@ -54,9 +40,23 @@ MODEL_NAME_DIR = "loaded_model_names"
 os.makedirs(MODEL_NAME_DIR, exist_ok=True)
 CHECK_INTERVAL = 2  # Check every N seconds for the list of model names
 
-BATCH_SIZE = 64
+BATCH_SIZE = 32
 
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
+
+MODEL_NAMES = {
+    "TEI": [
+        "multilingual-e5-large-instruct",
+        "UAE-Large-V1",
+    ],
+    "sentence_transformer": [
+        "SBERT-bert-base-spanish-wwm-uncased",
+        "LaBSE",
+        "sentence-camembert-large",  # fr
+    ],
+    "huggingface": [],
+    "pytorch": [],
+}
 
 # We may need multiple models at the same time, so we use a dictionary to store them
 # {model_name: model_instance}
@@ -91,17 +91,8 @@ def _load_model_sentence_transformer(
     )
 
     model = model.to(DEVICE)
-    # model = torch.compile(model, backend="torch_tensorrt", dynamic=False,
-    #                         options={
-    #                             "truncate_long_and_double": True,
-    #                             "precision": torch.half
-    #                             }
-    #                         )
+    
     model.eval()
-
-    # if not full_precision:
-    #     print(f'Optimizing')
-    #     model = ipex.optimize(model, dtype=torch.bfloat16)
 
     print(f"Done loading model: {model_name}. Took {time.time() - start:.2f}s")
     if warmup:
@@ -112,8 +103,6 @@ def _load_model_sentence_transformer(
                     "Artificial intelligence (AI), in its broadest sense, is intelligence exhibited by machines, particularly computer systems. It is a field of research in computer science that develops and studies methods and software that enable machines to perceive their environment and use learning and intelligence to take actions that maximize their chances of achieving defined goals. Such machines may be called AIs."
                 ]
             )
-        # with torch.inference_mode(), torch.cpu.amp.autocast():
-        #     model.encode(['Hello'])
         print(f"Warmup took an extra {time.time() - start:.2f}s")
     return model
 
@@ -123,7 +112,7 @@ class HFONNXModel:
         self.model = model
         self.tokenizer = tokenizer
 
-    def encode(self, sentences, batch_size=64):
+    def encode(self, sentences, batch_size=BATCH_SIZE):
         if isinstance(sentences, str):
             sentences = [sentences]
         all_embeddings = []
@@ -293,38 +282,83 @@ def check_for_model_update():
         time.sleep(CHECK_INTERVAL)
 
 
-def _compute_embeddings_tei(sentences: list[str], model_name: str, batch_size=32) -> list:
+def _compute_embeddings_tei(
+    sentences: list[str],
+    model_name: str,
+    batch_size: int,
+    max_len: int,
+) -> list:
+    if not sentences:
+        return []
+
+    # Truncate sentences that are too long, take the last max_len characters
+    sentences = [s[-max_len:].replace("\n", " ").strip() for s in sentences]
+
     # TEI service URL (port 8080, not 5000 like your Flask server)
     url = f"http://127.0.0.1:8080/{model_name}"
     headers = {"Content-Type": "application/json"}
-    
-    # TEI expects the data in this format: {"inputs": ["sentence1", "sentence2", ...]}
-    data = json.dumps({"inputs": sentences})
-    
-    # Make the POST request to TEI service
-    response = requests.post(url, headers=headers, data=data)
-    
-    # Parse the response
-    if response.status_code == 200:
-        embeddings = response.json()
-        return embeddings
-    else:
-        raise Exception(f"TEI request failed with status {response.status_code}: {response.text}")
-        
+
+    embeddings = [None] * len(sentences)
+    # Send batch of requests
+    for i in range(0, len(sentences), batch_size):
+        batch = sentences[i : i + batch_size]
+        data = json.dumps({"inputs": batch})
+
+        response = requests.post(url, headers=headers, data=data)
+
+        # Parse the response
+        if response.status_code == 200:
+            embeddings[i : i + batch_size] = response.json()
+        else:
+            raise Exception(
+                f"TEI request failed to get prediction, with status {response.status_code}: {response.text}"
+            )
+
+    return embeddings
 
 
-def compute_embeddings(sentences: list[str], model_dict: dict, model_name: str) -> list:
+def _compute_embeddings_sentence_transformer(
+    sentences: list[str],
+    model_dict: dict,
+    model_name: str,
+    batch_size: int,
+    max_len: int,
+) -> list:
+    if not sentences:
+        return []
+
+    # Truncate sentences that are too long, take the last max_len characters
+    sentences = [s[-max_len:].replace("\n", " ").strip() for s in sentences]
+
+    model = model_dict[model_name]
+    
+    with torch.inference_mode():
+        embeddings = model.encode(sentences, batch_size=batch_size)
+    
+    return embeddings.tolist()
+
+
+
+def compute_embeddings(
+    sentences: list[str],
+    model_dict: dict,
+    model_name: str,
+    batch_size: int = BATCH_SIZE,
+    max_len: int = 200,
+) -> list:
     """
     Compute embeddings for a list of sentences using the specified model.
     """
-    embeddings = None
-    model = model_dict[model_name]
+    embeddings = [None] * len(sentences)
 
     if model_type(model_name) == "TEI":
-        embeddings = _compute_embeddings_tei(sentences, model_name) # shape (1, 1024) 
+        embeddings = _compute_embeddings_tei(
+            sentences, model_name, batch_size=batch_size, max_len=max_len
+        )  
     elif model_type(model_name) == "sentence_transformer":
-        with torch.inference_mode():
-            embeddings = model.encode(sentences).tolist() # shape (1,768)
+        embeddings = _compute_embeddings_sentence_transformer(
+            sentences, model_dict, model_name, batch_size=batch_size, max_len=max_len
+        )  
     elif model_type(model_name) == "huggingface":
         pass
     elif model_type(model_name) == "pytorch":
@@ -341,7 +375,7 @@ def predict():
         return jsonify({"error": "Model not loaded"}), 503
 
     data = request.get_json()
-    # app.logger.info(f"Received data: {data}")
+    app.logger.info(f"Received data: {data}")
     sentences = data["sentences"]
     model_name = data["model_name"]
     if not sentences:
@@ -356,15 +390,6 @@ def predict():
         print(f"*** WARNING: Model {model_name} not already loaded. Loading it now...")
         model_dict[model_name] = load_model(model_name)
 
-    # with torch.inference_mode(), torch.autocast(device_type=DEVICE, dtype=torch.float16):
-    #     embeddings = model_dict[model_name].encode(sentences, batch_size=BATCH_SIZE)
-
-    # with torch.inference_mode():
-    #     embeddings = model_dict[model_name].encode(sentences, batch_size=BATCH_SIZE)
-    
-
-    # embeddings = embeddings.tolist()
-
     embeddings = compute_embeddings(sentences, model_dict, model_name)
 
     return jsonify(embeddings), 200
@@ -378,10 +403,8 @@ def run_app():
     # Start the embedding network for TEI models in the background
     script_dir = os.path.dirname(os.path.abspath(__file__))
     embed_start_path = os.path.join(script_dir, "embed_start.sh")
-    subprocess.Popen(["bash", embed_start_path])
+    subprocess.Popen(["bash", embed_start_path] + MODEL_NAMES["TEI"])
 
-    # Load all non TEI models
-    # model_names = ["gte-large-en-v1.5", "sentence-camembert-large", "all-MiniLM-L6-v2"]
     model_names = (
         MODEL_NAMES["TEI"]
         + MODEL_NAMES["sentence_transformer"]
@@ -405,5 +428,3 @@ if __name__ == "__main__":
 
     os.environ["daemon_exec"] = daemon_exec
     run_app()
-
-

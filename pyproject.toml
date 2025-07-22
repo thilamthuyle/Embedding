@@ -16,4 +16,5 @@ dependencies = [
     "onnxruntime-gpu",
     "light-embed>=0.1.2",
     "requests>=2.32.4",
+    "flask>=3.1.1",
 ]
