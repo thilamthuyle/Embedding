@@ -17,4 +17,6 @@ dependencies = [
     "light-embed>=0.1.2",
     "requests>=2.32.4",
     "flask>=3.1.1",
+    "sqlmodel>=0.0.24",
+    "sqlalchemy>=2.0.41",
 ]
