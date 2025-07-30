@@ -1,5 +1,6 @@
 import json
 import logging
+import ast
 from typing import Callable
 from pathlib import Path
 
@@ -18,6 +19,7 @@ from utils import (
     get_default_embedding_model,
     cosine_distance,
     remove_last_assistant_message,
+    user_text_matching,
 )
 
 import vocal.common.static  # noqa: F401
@@ -197,9 +199,9 @@ def extract_LLM_matchings(
     up_matchings = pd.DataFrame(
         columns=[
             "conversation",
-            "user_prompt",
+            "user_text",
             "possible_conv_paths",
-            "predicted_match",
+            "match_pred",
             "assistant",
             "call_id",
             "language",
@@ -331,9 +333,9 @@ def extract_LLM_matchings(
 
                         up_matchings.loc[len(up_matchings)] = {
                             "conversation": remove_last_assistant_message(conversation),
-                            "user_prompt": ut_query,
+                            "user_text": ut_query,
                             "possible_conv_paths": possible_conv_paths,
-                            "predicted_match": (up_pred, aa_pred, aq_pred),
+                            "match_pred": (up_pred, aa_pred, aq_pred),
                             "assistant": assistant,
                             "call_id": call_id,
                             "language": language,
@@ -381,21 +383,47 @@ def extract_LLM_matchings(
     return up_matchings, ao_matchings
 
 
+def add_user_text_matching_to_df(df: pd.DataFrame, model: str = "gpt-4o"):
+    """Add user text matching results as a new column to the DataFrame."""
+    # convert string back to list because saving DataFrame to Excel converts lists to strings
+    df["possible_conv_paths"] = df["possible_conv_paths"].apply(
+        lambda x: ast.literal_eval(x) if isinstance(x, str) else x)
+    match_true = []
+    
+
+    for _, row in df.iterrows():
+        match_true.append(user_text_matching(
+            row["user_text"], 
+            (row["possible_conv_paths"]), 
+            row["conversation"], 
+            row["language"],
+            model=model
+        ))
+    df['match_true'] = match_true
+
+
 if __name__ == "__main__":
-    up_matchings, ao_matchings = extract_LLM_matchings(CALL_TRANSCRIPTS_PATH)
-    ao_matchings.to_excel(LLM_MATCHING_AO_PATH, index=False)
-    up_matchings.to_excel(LLM_MATCHING_UP_PATH, index=False)
+    # up_matchings, ao_matchings = extract_LLM_matchings(CALL_TRANSCRIPTS_PATH)
+    # ao_matchings.to_excel(LLM_MATCHING_AO_PATH, index=False)
+    # up_matchings.to_excel(LLM_MATCHING_UP_PATH, index=False)
 
     df = pd.read_excel(LLM_MATCHING_UP_PATH)
+    # df = df.rename(columns={"user_prompt": "user_text"})  # Rename column
+
     df = df[df["language"] == "en"][:5]
+    add_user_text_matching_to_df(df, model="gpt-4o")
+    print(df.head())
 
-    df = extract_embedding_matchings(CALL_TRANSCRIPTS_PATH)
-    df.to_excel(MATCHING_PATH, index=False)
 
-    df = pd.read_excel(MATCHING_PATH)
 
-    compute_matching_distance_by_language(df)
-    df.to_excel(MATCHING_DISTANCE_PATH, index=False)
+
+    # df = extract_embedding_matchings(CALL_TRANSCRIPTS_PATH)
+    # df.to_excel(MATCHING_PATH, index=False)
+
+    # df = pd.read_excel(MATCHING_PATH)
+
+    # compute_matching_distance_by_language(df)
+    # df.to_excel(MATCHING_DISTANCE_PATH, index=False)
 
     # df_es = filter_by_language(df, "es")
     # df_es.to_excel(MATCHING_ES_PATH, index=False)

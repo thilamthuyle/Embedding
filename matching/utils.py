@@ -2,16 +2,19 @@ from getvocal.datamodel.sql.conversational_paths import ConversationalPaths
 import sqlmodel as sm
 import numpy as np
 import pandas as pd
+import json
 import logging
 from enum import Enum
 from vocal.common.utils import normalize_text
+from vocal.chat_engine.utils import remove_guards
 from getvocal.datamodel.sql.assistants import Assistants
 from getvocal.datamodel.sql.assistant_texts import AssistantTexts
 from getvocal.datamodel.sql.assistant_questions import AssistantQuestions
 from getvocal.datamodel.sql.user_prompts import UserPrompts
-from vocal.chat_engine.utils import remove_guards
-
 from getvocal.datamodel.sql.assistants import DEFAULT_EMBEDDING_MODEL_PER_LANGUAGE
+
+from getvocal.multimodal.llms import chat_response
+from getvocal.multimodal.types.llms import Response
 
 
 class Language(Enum):
@@ -23,7 +26,9 @@ class Language(Enum):
 
 
 SELECT_USER_DB_CONTEXT = """
-You are a helpful conversational assistant talking with a user over a phone call. Here's an ongoing conversation between an assistant and a user:
+You are a helpful conversational assistant talking with a user over a phone call. 
+The conversation is in {language}. 
+Here's an ongoing conversation between an assistant and a user:
 
 {conversation}
 
@@ -68,9 +73,7 @@ If there is no match with what the speaker has said, then
 def get_user_prompt_id_from_source_node(source_node_id: str) -> list[str]:
     user_prompt_ids = []
     conv_paths = ConversationalPaths.query(
-        sm.select(ConversationalPaths).where(
-            ConversationalPaths.source_node_id == source_node_id
-        )
+        sm.select(ConversationalPaths).where(ConversationalPaths.source_node_id == source_node_id)
     )
     for conv_path in conv_paths:
         user_prompt_ids.append(conv_path.user_prompt_id)
@@ -103,9 +106,7 @@ def get_texts_by_assistant(assistant_id: str) -> list[str]:
 
 def get_questions_by_assistant(assistant_id: str) -> list[str]:
     assistant_questions = AssistantQuestions.query(
-        sm.select(AssistantQuestions).where(
-            AssistantQuestions.assistant_id == assistant_id
-        )
+        sm.select(AssistantQuestions).where(AssistantQuestions.assistant_id == assistant_id)
     )
     return [question.text for question in assistant_questions]
 
@@ -140,15 +141,15 @@ def check_normalized_text_matching(ut_query: str, user_prompt_id: str) -> bool:
             return normalize_text(ut_query) == normalize_text(ut_match)
         else:  # If the user prompt is primary, check for attached (secondary) user prompts and get their texts
             attached_user_prompt_ids = user_prompt.attached_user_prompt_ids
-            if attached_user_prompt_ids:  # primary user prompt is likely to have empty list of attached user prompts
+            if (
+                attached_user_prompt_ids
+            ):  # primary user prompt is likely to have empty list of attached user prompts
                 for attached_user_prompt_id in attached_user_prompt_ids:
                     try:
-                        attached_user_text = UserPrompts.get_by_ids(
-                            [attached_user_prompt_id]
-                        )[0].text
-                        if normalize_text(ut_query) == normalize_text(
-                            attached_user_text
-                        ):
+                        attached_user_text = UserPrompts.get_by_ids([attached_user_prompt_id])[
+                            0
+                        ].text
+                        if normalize_text(ut_query) == normalize_text(attached_user_text):
                             logging.info(
                                 f"Skipping exact match for user prompt: {ut_query} with attached user prompt: {attached_user_text}"
                             )
@@ -163,29 +164,80 @@ def check_normalized_text_matching(ut_query: str, user_prompt_id: str) -> bool:
         return False
 
 
-# def user_text_matching(
-#     user_text: str,
-#     possible_conv_paths: list[(str, str, str)],
-#     conversation: str,
-#     language: str,
-# ) -> list[(str, str, str)]:
-#     """
-#     Match a user text to a set of possible conversational paths using an LLM.
-#     """
-#     list_of_possible_answers = ""
-#     for i, (up, aa, aq) in enumerate(possible_conv_paths):
-#         up = remove_guards(up)  # remove guards from user prompt
-#         if aq is None:
-#             list_of_possible_answers += (
-#                 f"{i}. '{up}' and assistant responds with: '{aa}'\n"
-#             )
-#         else:
-#             list_of_possible_answers += (
-#                 f"{i}. '{up}' and assistant responds with: '{aa} {aq}'\n"
-#             )
+async def user_text_matching(
+    user_text: str,
+    possible_conv_paths: list[(str, str, str)],
+    conversation: str,
+    language: str,
+    model: str,
+) -> list[(str, str, str)]:
+    """
+    Match a user text to a set of possible conversational paths using an LLM.
+    """
+    list_of_possible_answers = ""
+    for i, (up, aa, aq) in enumerate(possible_conv_paths):
+        up = remove_guards(up)  # remove guards from user prompt
+        if aq is None:
+            list_of_possible_answers += f"{i}. '{up}' and assistant responds with: '{aa}'\n"
+        else:
+            list_of_possible_answers += f"{i}. '{up}' and assistant responds with: '{aa} {aq}'\n"
 
-#     prompt = (
-#         SELECT_USER_DB_CONTEXT.replace("{conversation}", conversation)
-#         .replace("{user_prompt}", user_text)
-#         .replace("{list_of_possible_answers}", list_of_possible_answers)
-#     )
+    prompt = (
+        SELECT_USER_DB_CONTEXT.replace("{language}", language)
+        .replace("{conversation}", conversation)
+        .replace("{user_prompt}", user_text)
+        .replace("{list_of_possible_answers}", list_of_possible_answers)
+    )
+    logging.debug(f'user_text_matching system prompt: "{prompt}"')
+    messages = [
+        {"role": "system", "content": prompt},
+        {
+            "role": "user",
+            "content": "Following the previous guidelines, provide your output following the desired format.",
+        },
+    ]
+
+    response = await chat_response(messages=messages, model=model)
+    
+    # Extract the text message from the response
+    response_output = ""
+    if response and response.output:
+        for output in response.output:
+            if output.type == "message":
+                for content in output.content:
+                    if content.type == "output_text":
+                        response_output = content.text
+                        break
+                break
+    
+    if not response_output:
+        logging.debug("Got empty response from LLM.")
+        return (None, None, None)
+    
+    try:
+        response_json = json.loads(response_output)
+        
+        # Extract the output from the JSON response
+        output = response_json.get("output", "none")
+        reasoning = response_json.get("reasoning", "")
+        
+        logging.debug(f"LLM response - reasoning: {reasoning}, output: {output}")
+        
+        if output == "none":
+            return (None, None, None)
+        
+        try:
+            index = int(output)
+            if 0 <= index < len(possible_conv_paths):
+                return possible_conv_paths[index]
+            else:
+                logging.warning(f"Invalid index {index} from LLM response")
+                return (None, None, None)
+        except ValueError:
+            logging.warning(f"Could not parse output as integer: {output}")
+            return (None, None, None)
+            
+    except json.JSONDecodeError as e:
+        logging.error(f"Failed to parse JSON response: {response_output}. Error: {e}")
+        return (None, None, None)
+    
