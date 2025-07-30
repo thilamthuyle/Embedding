@@ -1,28 +1,52 @@
 import json
+import logging
 from typing import Callable
 from pathlib import Path
 
 import pandas as pd
+import sqlmodel as sm
 
 from getvocal.datamodel.sql.user_prompts import UserPrompts
 from getvocal.datamodel.sql.assistant_texts import AssistantTexts
 from getvocal.datamodel.sql.assistant_questions import AssistantQuestions
+from getvocal.datamodel.sql.assistant_answers import AssistantAnswers
+from getvocal.datamodel.sql.conversational_paths import ConversationalPaths
 
-
-from utils import get_questions_by_assistant, get_texts_by_assistant, get_assistant_language, is_normalized_text_matching, filter_matchings_by_language, get_default_embedding_model, cosine_distance, get_user_prompt_id_from_source_node
+from utils import (
+    get_assistant_language,
+    check_normalized_text_matching,
+    get_default_embedding_model,
+    cosine_distance,
+    remove_last_assistant_message,
+)
 
 import vocal.common.static  # noqa: F401
 from vocal.common.embedding_utils import EmbeddingFunction
 from vocal.common.embedding_utils import compute_embeddings_gpu
 
+# Configure logging to show INFO level messages
+# Force reconfiguration even if logging was already configured
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(levelname)s - %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
+    force=True,
+)
+
 
 CALL_TRANSCRIPTS_PATH = "/www/files/call_transcripts"  # Path to saved call transcripts
-MATCHING_PATH = "/www/files/matching.xlsx"  # Path to save matchings extracted from call transcripts
+MATCHING_PATH = (
+    "/www/files/matching.xlsx"  # Path to save matchings extracted from call transcripts
+)
 MATCHING_ES_PATH = "/www/files/matching_es.xlsx"  # Spanigh matchings
 MATCHING_DISTANCE_ES_PATH = "/www/files/matching_es.xlsx"  # Spanigh matchings
 MATCHING_DISTANCE_PATH = "/www/files/matching_distance.xlsx"  # Matchings with distance between query & match embeddings
-LLM_MATCHING_UP_PATH = "/www/files/llm_matching_up.xlsx"  # Path to save LLM user prompt matchings
-LLM_MATCHING_AO_PATH = "/www/files/llm_matching_ao.xlsx"  # Path to save LLM assistant output matchings
+LLM_MATCHING_UP_PATH = (
+    "/www/files/llm_matching_up.xlsx"  # Path to save LLM user prompt matchings
+)
+LLM_MATCHING_AO_PATH = (
+    "/www/files/llm_matching_ao.xlsx"  # Path to save LLM assistant output matchings
+)
 
 
 def extract_embedding_matchings(
@@ -58,12 +82,18 @@ def extract_embedding_matchings(
                     # User prompt query
                     ut_query = message["text"]  # live transcription
                     if message["matching"]:
-                        ut_query = message["matching"]["original"]  # offline transcription
+                        ut_query = message["matching"][
+                            "original"
+                        ]  # offline transcription
 
                 if (
                     message["matching"] is None  # USER message, there's no matching
-                    or "distance" not in message["matching"]  # ASSISTANT message with no matching found
-                    or "distance" in message["matching"]  # ASSISTANT message with distance = 0.0
+                    or "distance"
+                    not in message[
+                        "matching"
+                    ]  # ASSISTANT message with no matching found
+                    or "distance"
+                    in message["matching"]  # ASSISTANT message with distance = 0.0
                     and message["matching"]["distance"] == 0.0
                 ):
                     continue
@@ -74,8 +104,12 @@ def extract_embedding_matchings(
                         # make sure that each conv_path_id is processed only once
                         seen_conv_path_ids.add(message["matching"]["conv_path_id"])
 
-                        user_prompt_id = message["matching"]["user_prompt_id"]
-                        up_example_match = UserPrompts.get_by_ids([user_prompt_id])[0].text
+                        user_prompt_id = message["matching"][
+                            "user_prompt_id"
+                        ]  # NON PRIMARY
+                        up_example_match = UserPrompts.get_by_ids([user_prompt_id])[
+                            0
+                        ].text
                         df.loc[len(df)] = {
                             "assistant": assistant,
                             "call_id": call_id,
@@ -89,11 +123,17 @@ def extract_embedding_matchings(
                     # It was the assistant output that was matched
                     ao_match = None
                     if message["source"] == "DB_QUESTION":
-                        ao_match = AssistantQuestions.get_by_ids([message["matching"]["id"]])
+                        ao_match = AssistantQuestions.get_by_ids(
+                            [message["matching"]["id"]]
+                        )
                     elif message["source"] == "DB_TEXT":
-                        ao_match = AssistantTexts.get_by_ids([message["matching"]["id"]])
+                        ao_match = AssistantTexts.get_by_ids(
+                            [message["matching"]["id"]]
+                        )
                     if ao_match:
-                        ao_query = message["matching"]["original"]  # Assistant output query
+                        ao_query = message["matching"][
+                            "original"
+                        ]  # Assistant output query
                         ao_match = ao_match[0].text
                         df.loc[len(df)] = {
                             "assistant": assistant,
@@ -110,7 +150,9 @@ def extract_embedding_matchings(
 
 def compute_matching_distance_by_language(
     df: pd.DataFrame,
-    get_embedding_model_per_language: Callable[[str], str] = get_default_embedding_model,
+    get_embedding_model_per_language: Callable[
+        [str], str
+    ] = get_default_embedding_model,
 ):
     """
     Compute the distance between query and match embeddings using one embedding model per language.
@@ -131,7 +173,9 @@ def compute_matching_distance_by_language(
     df["embedding model"] = embedding_models
 
 
-def compute_matching_distance_with_multiple_embedding_models(df: pd.DataFrame, embedding_models: list[str]):
+def compute_matching_distance_with_multiple_embedding_models(
+    df: pd.DataFrame, embedding_models: list[str]
+):
     """
     Compute the distance between query and match embeddings using the specified embedding models.
     """
@@ -154,12 +198,10 @@ def extract_LLM_matchings(
         columns=[
             "conversation",
             "user_prompt",
-            "list_of_possible_intents",
-            "list_of_possible_answers",
-            "match",
+            "possible_conv_paths",
+            "predicted_match",
             "assistant",
             "call_id",
-            "source",
             "language",
         ]
     )
@@ -181,8 +223,8 @@ def extract_LLM_matchings(
     for assistant_dir in Path(CALL_TRANSCRIPTS_PATH).iterdir():
         assistant = assistant_dir.name
         language = get_assistant_language(assistant)
-        assistant_questions = get_questions_by_assistant(assistant)
-        assistant_texts = get_texts_by_assistant(assistant)
+        # assistant_questions = get_questions_by_assistant(assistant)
+        # assistant_texts = get_texts_by_assistant(assistant)
 
         for file in assistant_dir.iterdir():
             call_id = Path(file.name).stem
@@ -190,10 +232,13 @@ def extract_LLM_matchings(
             ut_query = None
             conversation = ""
 
+            logging.info(f"Processing call_id: {call_id} for assistant: {assistant}")
+
             for message in message_list[1:]:
-                list_of_possible_answers = []
-                list_of_possible_intents = []
-                list_of_possible_questions = []
+                # list_of_possible_answers = []
+                # list_of_possible_intents = []
+                # list_of_possible_questions = []
+                possible_conv_paths = []
 
                 conversation += f"{message['role']}: {message['text']}\n"
 
@@ -201,9 +246,15 @@ def extract_LLM_matchings(
                     # User prompt query
                     ut_query = message["text"]  # live transcription
                     if message["matching"]:
-                        ut_query = message["matching"]["original"]  # offline transcription
+                        ut_query = message["matching"][
+                            "original"
+                        ]  # offline transcription
 
-                if message["matching"] is not None and "distance" in message["matching"] and message["matching"]["distance"] == 0.0:
+                if (
+                    message["matching"] is not None
+                    and "distance" in message["matching"]
+                    and message["matching"]["distance"] == 0.0
+                ):
                     # A matching with distance = 0.0 is either an exact match or initial message matching or LLM matching
 
                     if "conv_path_id" in message["matching"]:
@@ -213,98 +264,130 @@ def extract_LLM_matchings(
                         if ut_query is None or "init" in ut_query.lower():
                             continue
 
-                        if message["matching"]["conv_path_id"] not in seen_conv_path_ids:
-                            # make sure that each conv_path_id is processed only once
-                            seen_conv_path_ids.add(message["matching"]["conv_path_id"])
+                        # make sure that each conv_path_id is processed only once
+                        conv_path_id = message["matching"]["conv_path_id"]
+                        if conv_path_id in seen_conv_path_ids:
+                            continue
+                        seen_conv_path_ids.add(conv_path_id)
 
-                            if message["matching"]["user_prompt_id"] is not None:
-                                user_prompt_id = message["matching"]["user_prompt_id"]
-
-                                # handle error case where user_prompt_id = False or conv_path_id
-                                if user_prompt_id is False or UserPrompts.get_by_ids([user_prompt_id]) == []:
-                                    continue
-
-                                # ignore exact matching
-                                up_example_match = UserPrompts.get_by_ids([user_prompt_id])[0].text
-                                if is_normalized_text_matching(ut_query, up_example_match):
-                                    continue
-                            else:
-                                up_example_match = None
-
-                            # for LLM matching, extract conversation, user_prompt, list_of_possible_intents, and list_of_possible_answers
-                            source_node_id = message["matching"]["conv_path_id"].split("_")[0]
-                            primary_ids = get_user_prompt_id_from_source_node(source_node_id)
-                            primary_ups = UserPrompts.get_by_ids(primary_ids)
-
-                            for primary_up in primary_ups:
-                                list_of_possible_intents.append(primary_up.text)
-
-                                attached_up_ids = primary_up.attached_user_prompt_ids
-                                if attached_up_ids:
-                                    list_of_possible_answers.extend([up.text for up in UserPrompts.get_by_ids(attached_up_ids)])
-
-                            up_matchings.loc[len(up_matchings)] = {
-                                "conversation": conversation,
-                                "user_prompt": ut_query,
-                                "list_of_possible_intents": list_of_possible_intents,
-                                "list_of_possible_answers": list_of_possible_answers,
-                                "match": up_example_match,
-                                "assistant": assistant,
-                                "call_id": call_id,
-                                "source": "DB_USER_PROMPT",
-                                "language": language,
-                            }
-
-                    else:
-                        # It was the assistant output that was matched
-
-                        # ignore initial message matching
-                        if message["id"] == "init":
+                        # ignore conv_path that is not in the DB
+                        conv_path = ConversationalPaths.get_by_ids([conv_path_id])
+                        if not conv_path:
                             continue
 
-                        ao_query = message["matching"]["original"]  # Assistant output query
+                        conv_path = conv_path[0]
+                        source_node_id = conv_path.source_node_id
+                        user_prompt_id = conv_path.user_prompt_id  # PRIMARY user prompt
+                        assistant_answer_id = conv_path.assistant_answer_id
+                        target_node_id = conv_path.target_node_id
 
-                        ao_match = None
-                        if message["source"] == "DB_QUESTION":
-                            ao_match = AssistantQuestions.get_by_ids([message["matching"]["id"]])
-                        elif message["source"] == "DB_TEXT":
-                            ao_match = AssistantTexts.get_by_ids([message["matching"]["id"]])
-                        if ao_match:
-                            ao_match = ao_match[0].text
+                        # depth 1 matching
+                        if not source_node_id:
+                            continue
 
-                            # ignore exact matching
-                            if is_normalized_text_matching(ao_query, ao_match):
-                                continue
+                        # depth 2 matching
+                        up_pred = UserPrompts.get_by_ids([user_prompt_id])[0].text
+                        aa_pred = (
+                            AssistantAnswers.get_by_ids([assistant_answer_id])[0].text
+                            if assistant_answer_id
+                            else None
+                        )
+                        aq_pred = (
+                            AssistantQuestions.get_by_ids([target_node_id])[0].text
+                            if AssistantQuestions.get_by_ids([target_node_id])
+                            else None
+                        )  # follow up question is optional
 
-                            # for LLM matching, extract conversation, source_question, and list_of_possible_questions
-                            if message["source"] == "DB_QUESTION":
-                                list_of_possible_questions.extend(assistant_questions)
-                            elif message["source"] == "DB_TEXT":
-                                list_of_possible_questions.extend(assistant_texts)
+                        # ignore exact matching
+                        if (
+                            check_normalized_text_matching(ut_query, user_prompt_id)
+                            is True
+                        ):
+                            continue
 
-                            ao_matchings.loc[len(ao_matchings)] = {
-                                "conversation": conversation,
-                                "source_question": ao_query,
-                                "list_of_possible_questions": list_of_possible_questions,
-                                "match": ao_match,
-                                "assistant": assistant,
-                                "call_id": call_id,
-                                "source": message["source"],
-                                "language": language,
-                            }
+                        # Extract possible (UP, AA, AQ) from source_node
+                        conv_paths_from_source_node = ConversationalPaths.query(
+                            sm.select(ConversationalPaths).where(
+                                ConversationalPaths.source_node_id == source_node_id
+                            )
+                        )
+                        for conv_path in conv_paths_from_source_node:
+                            up = UserPrompts.get_by_ids([conv_path.user_prompt_id])[
+                                0
+                            ].text
+                            aa = AssistantAnswers.get_by_ids(
+                                [conv_path.assistant_answer_id]
+                            )[0].text
+                            aq = (
+                                AssistantQuestions.get_by_ids(
+                                    [conv_path.target_node_id]
+                                )[0].text
+                                if AssistantQuestions.get_by_ids(
+                                    [conv_path.target_node_id]
+                                )
+                                else None
+                            )  # follow up question is optional
+                            possible_conv_paths.append((up, aa, aq))
+
+                        up_matchings.loc[len(up_matchings)] = {
+                            "conversation": remove_last_assistant_message(conversation),
+                            "user_prompt": ut_query,
+                            "possible_conv_paths": possible_conv_paths,
+                            "predicted_match": (up_pred, aa_pred, aq_pred),
+                            "assistant": assistant,
+                            "call_id": call_id,
+                            "language": language,
+                        }
+
+                    # else:
+                    #     # It was the assistant output that was matched
+
+                    #     # ignore initial message matching
+                    #     if message["id"] == "init":
+                    #         continue
+
+                    #     ao_query = message["matching"]["original"]  # Assistant output query
+
+                    #     ao_match = None
+                    #     if message["source"] == "DB_QUESTION":
+                    #         ao_match = AssistantQuestions.get_by_ids([message["matching"]["id"]])
+                    #     elif message["source"] == "DB_TEXT":
+                    #         ao_match = AssistantTexts.get_by_ids([message["matching"]["id"]])
+                    #     if ao_match:
+                    #         ao_match = ao_match[0].text
+
+                    #         # ignore exact matching
+                    #         if is_normalized_text_matching(ao_query, ao_match):
+                    #             continue
+
+                    #         # for LLM matching, extract conversation, source_question, and list_of_possible_questions
+                    #         if message["source"] == "DB_QUESTION":
+                    #             list_of_possible_questions.extend(assistant_questions)
+                    #         elif message["source"] == "DB_TEXT":
+                    #             list_of_possible_questions.extend(assistant_texts)
+
+                    #         ao_matchings.loc[len(ao_matchings)] = {
+                    #             "conversation": conversation,
+                    #             "source_question": ao_query,
+                    #             "list_of_possible_questions": list_of_possible_questions,
+                    #             "match": ao_match,
+                    #             "assistant": assistant,
+                    #             "call_id": call_id,
+                    #             "source": message["source"],
+                    #             "language": language,
+                    #         }
+                # conversation += f"{message['role']}: {message['text']}\n"
 
     return up_matchings, ao_matchings
-
-
-def user_text_matching(user_prompt: str, list_of_possible_intents: list[str], list_of_possible_answers: list[str]) -> dict:
-    """Matches """
 
 
 if __name__ == "__main__":
     up_matchings, ao_matchings = extract_LLM_matchings(CALL_TRANSCRIPTS_PATH)
     ao_matchings.to_excel(LLM_MATCHING_AO_PATH, index=False)
     up_matchings.to_excel(LLM_MATCHING_UP_PATH, index=False)
-    
+
+    df = pd.read_excel(LLM_MATCHING_UP_PATH)
+    df = df[df["language"] == "en"][:5]
 
     df = extract_embedding_matchings(CALL_TRANSCRIPTS_PATH)
     df.to_excel(MATCHING_PATH, index=False)
@@ -314,11 +397,11 @@ if __name__ == "__main__":
     compute_matching_distance_by_language(df)
     df.to_excel(MATCHING_DISTANCE_PATH, index=False)
 
-    df_es = filter_matchings_by_language(df, "es")
-    df_es.to_excel(MATCHING_ES_PATH, index=False)
-    df_es = pd.read_excel(MATCHING_ES_PATH)
+    # df_es = filter_by_language(df, "es")
+    # df_es.to_excel(MATCHING_ES_PATH, index=False)
+    # df_es = pd.read_excel(MATCHING_ES_PATH)
 
     # embedding_models = [MONOINGUAL_EMBEDDING_MODELS_PER_LANGUAGE["es"][0]]
-    embedding_models = ["UAE-Large-V1"]
-    compute_matching_distance_with_multiple_embedding_models(df_es, embedding_models)
-    df_es.to_excel(MATCHING_DISTANCE_ES_PATH, index=False)
+    # embedding_models = ["UAE-Large-V1"]
+    # compute_matching_distance_with_multiple_embedding_models(df_es, embedding_models)
+    # df_es.to_excel(MATCHING_DISTANCE_ES_PATH, index=False)
