@@ -1,3 +1,4 @@
+import vocal.common.static
 from getvocal.datamodel.sql.conversational_paths import ConversationalPaths
 import sqlmodel as sm
 import numpy as np
@@ -111,21 +112,29 @@ def get_questions_by_assistant(assistant_id: str) -> list[str]:
     return [question.text for question in assistant_questions]
 
 
-def remove_last_assistant_message(conversation: str) -> str:
+def remove_last_assistant_messages(conversation: str) -> str:
     """
-    Remove the last assistant message from the conversation string.
+    Remove all assistant messages after the last user message from the conversation string.
     """
     if not conversation:
         return conversation
 
     # Split the conversation into lines
     lines = conversation.strip().split("\n")
-
-    # If the last line is an assistant message, remove it
-    if lines and lines[-1].startswith("ASSISTANT:"):
-        return "\n".join(lines[:-1])
-
-    return conversation
+    
+    # Find the index of the last USER message
+    last_user_index = -1
+    for i in range(len(lines) - 1, -1, -1):
+        if lines[i].startswith("USER:"):
+            last_user_index = i
+            break
+    
+    # If no USER message found, return original conversation
+    if last_user_index == -1:
+        return conversation
+    
+    # Keep everything up to and including the last USER message
+    return "\n".join(lines[:last_user_index + 1])
 
 
 def check_normalized_text_matching(ut_query: str, user_prompt_id: str) -> bool:
@@ -170,9 +179,13 @@ async def user_text_matching(
     conversation: str,
     language: str,
     model: str,
-) -> list[(str, str, str)]:
+) -> tuple[tuple[str, str, str] | None, str]:
     """
     Match a user text to a set of possible conversational paths using an LLM.
+    
+    Returns:
+        matched_conv_path: The selected conversational path tuple (up, aa, aq) or None if no match
+        reasoning (str): The LLM's explanation for why it picked that particular answer or why no match was found
     """
     list_of_possible_answers = ""
     for i, (up, aa, aq) in enumerate(possible_conv_paths):
@@ -197,47 +210,16 @@ async def user_text_matching(
         },
     ]
 
-    response = await chat_response(messages=messages, model=model)
-    
-    # Extract the text message from the response
-    response_output = ""
-    if response and response.output:
-        for output in response.output:
-            if output.type == "message":
-                for content in output.content:
-                    if content.type == "output_text":
-                        response_output = content.text
-                        break
-                break
-    
-    if not response_output:
-        logging.debug("Got empty response from LLM.")
-        return (None, None, None)
-    
+    response = await chat_response(
+        messages=messages, model=model, response_format={"type": "json_object"}, stream=False
+    )
+
     try:
-        response_json = json.loads(response_output)
-        
-        # Extract the output from the JSON response
-        output = response_json.get("output", "none")
-        reasoning = response_json.get("reasoning", "")
-        
-        logging.debug(f"LLM response - reasoning: {reasoning}, output: {output}")
-        
-        if output == "none":
-            return (None, None, None)
-        
-        try:
-            index = int(output)
-            if 0 <= index < len(possible_conv_paths):
-                return possible_conv_paths[index]
-            else:
-                logging.warning(f"Invalid index {index} from LLM response")
-                return (None, None, None)
-        except ValueError:
-            logging.warning(f"Could not parse output as integer: {output}")
-            return (None, None, None)
-            
-    except json.JSONDecodeError as e:
-        logging.error(f"Failed to parse JSON response: {response_output}. Error: {e}")
-        return (None, None, None)
-    
+        response = response.output_text
+        result = json.loads(response)
+        matched_user_prompt = result["output"]
+        reasoning = result["reasoning"]
+        return matched_user_prompt, reasoning
+    except Exception as e:
+        logging.warning(f"Failed to decode the response: {response}. Error: {e}")
+        return None, None

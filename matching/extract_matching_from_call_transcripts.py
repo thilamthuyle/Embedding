@@ -3,7 +3,7 @@ import logging
 import ast
 from typing import Callable
 from pathlib import Path
-
+import asyncio
 import pandas as pd
 import sqlmodel as sm
 
@@ -18,7 +18,7 @@ from utils import (
     check_normalized_text_matching,
     get_default_embedding_model,
     cosine_distance,
-    remove_last_assistant_message,
+    remove_last_assistant_messages,
     user_text_matching,
 )
 
@@ -26,10 +26,10 @@ import vocal.common.static  # noqa: F401
 from vocal.common.embedding_utils import EmbeddingFunction
 from vocal.common.embedding_utils import compute_embeddings_gpu
 
-# Configure logging to show INFO level messages
+# Configure logging to show DEBUG level messages
 # Force reconfiguration even if logging was already configured
 logging.basicConfig(
-    level=logging.INFO,
+    level=logging.DEBUG,
     format="%(asctime)s - %(levelname)s - %(message)s",
     datefmt="%Y-%m-%d %H:%M:%S",
     force=True,
@@ -37,15 +37,13 @@ logging.basicConfig(
 
 
 CALL_TRANSCRIPTS_PATH = "/www/files/call_transcripts"  # Path to saved call transcripts
-MATCHING_PATH = (
-    "/www/files/matching.xlsx"  # Path to save matchings extracted from call transcripts
-)
+MATCHING_PATH = "/www/files/matching.xlsx"  # Path to save matchings extracted from call transcripts
 MATCHING_ES_PATH = "/www/files/matching_es.xlsx"  # Spanigh matchings
 MATCHING_DISTANCE_ES_PATH = "/www/files/matching_es.xlsx"  # Spanigh matchings
-MATCHING_DISTANCE_PATH = "/www/files/matching_distance.xlsx"  # Matchings with distance between query & match embeddings
-LLM_MATCHING_UP_PATH = (
-    "/www/files/llm_matching_up.xlsx"  # Path to save LLM user prompt matchings
+MATCHING_DISTANCE_PATH = (
+    "/www/files/matching_distance.xlsx"  # Matchings with distance between query & match embeddings
 )
+LLM_MATCHING_UP_PATH = "/www/files/llm_matching_up.xlsx"  # Path to save LLM user prompt matchings
 LLM_MATCHING_AO_PATH = (
     "/www/files/llm_matching_ao.xlsx"  # Path to save LLM assistant output matchings
 )
@@ -84,18 +82,13 @@ def extract_embedding_matchings(
                     # User prompt query
                     ut_query = message["text"]  # live transcription
                     if message["matching"]:
-                        ut_query = message["matching"][
-                            "original"
-                        ]  # offline transcription
+                        ut_query = message["matching"]["original"]  # offline transcription
 
                 if (
                     message["matching"] is None  # USER message, there's no matching
                     or "distance"
-                    not in message[
-                        "matching"
-                    ]  # ASSISTANT message with no matching found
-                    or "distance"
-                    in message["matching"]  # ASSISTANT message with distance = 0.0
+                    not in message["matching"]  # ASSISTANT message with no matching found
+                    or "distance" in message["matching"]  # ASSISTANT message with distance = 0.0
                     and message["matching"]["distance"] == 0.0
                 ):
                     continue
@@ -106,12 +99,8 @@ def extract_embedding_matchings(
                         # make sure that each conv_path_id is processed only once
                         seen_conv_path_ids.add(message["matching"]["conv_path_id"])
 
-                        user_prompt_id = message["matching"][
-                            "user_prompt_id"
-                        ]  # NON PRIMARY
-                        up_example_match = UserPrompts.get_by_ids([user_prompt_id])[
-                            0
-                        ].text
+                        user_prompt_id = message["matching"]["user_prompt_id"]  # NON PRIMARY
+                        up_example_match = UserPrompts.get_by_ids([user_prompt_id])[0].text
                         df.loc[len(df)] = {
                             "assistant": assistant,
                             "call_id": call_id,
@@ -125,17 +114,11 @@ def extract_embedding_matchings(
                     # It was the assistant output that was matched
                     ao_match = None
                     if message["source"] == "DB_QUESTION":
-                        ao_match = AssistantQuestions.get_by_ids(
-                            [message["matching"]["id"]]
-                        )
+                        ao_match = AssistantQuestions.get_by_ids([message["matching"]["id"]])
                     elif message["source"] == "DB_TEXT":
-                        ao_match = AssistantTexts.get_by_ids(
-                            [message["matching"]["id"]]
-                        )
+                        ao_match = AssistantTexts.get_by_ids([message["matching"]["id"]])
                     if ao_match:
-                        ao_query = message["matching"][
-                            "original"
-                        ]  # Assistant output query
+                        ao_query = message["matching"]["original"]  # Assistant output query
                         ao_match = ao_match[0].text
                         df.loc[len(df)] = {
                             "assistant": assistant,
@@ -152,9 +135,7 @@ def extract_embedding_matchings(
 
 def compute_matching_distance_by_language(
     df: pd.DataFrame,
-    get_embedding_model_per_language: Callable[
-        [str], str
-    ] = get_default_embedding_model,
+    get_embedding_model_per_language: Callable[[str], str] = get_default_embedding_model,
 ):
     """
     Compute the distance between query and match embeddings using one embedding model per language.
@@ -230,6 +211,9 @@ def extract_LLM_matchings(
 
         for file in assistant_dir.iterdir():
             call_id = Path(file.name).stem
+
+            # file = Path('/www/files/call_transcripts/J2gyMMqPFjLccAyocqTj/c064e4ed-9fc8-42f2-a3e1-5d104717101f.json')
+
             message_list = json.loads(file.read_text(encoding="utf-8"))
             ut_query = None
             conversation = ""
@@ -248,9 +232,7 @@ def extract_LLM_matchings(
                     # User prompt query
                     ut_query = message["text"]  # live transcription
                     if message["matching"]:
-                        ut_query = message["matching"][
-                            "original"
-                        ]  # offline transcription
+                        ut_query = message["matching"]["original"]  # offline transcription
 
                 if (
                     message["matching"] is not None
@@ -301,10 +283,7 @@ def extract_LLM_matchings(
                         )  # follow up question is optional
 
                         # ignore exact matching
-                        if (
-                            check_normalized_text_matching(ut_query, user_prompt_id)
-                            is True
-                        ):
+                        if check_normalized_text_matching(ut_query, user_prompt_id) is True:
                             continue
 
                         # Extract possible (UP, AA, AQ) from source_node
@@ -314,25 +293,19 @@ def extract_LLM_matchings(
                             )
                         )
                         for conv_path in conv_paths_from_source_node:
-                            up = UserPrompts.get_by_ids([conv_path.user_prompt_id])[
+                            up = UserPrompts.get_by_ids([conv_path.user_prompt_id])[0].text
+                            aa = AssistantAnswers.get_by_ids([conv_path.assistant_answer_id])[
                                 0
                             ].text
-                            aa = AssistantAnswers.get_by_ids(
-                                [conv_path.assistant_answer_id]
-                            )[0].text
                             aq = (
-                                AssistantQuestions.get_by_ids(
-                                    [conv_path.target_node_id]
-                                )[0].text
-                                if AssistantQuestions.get_by_ids(
-                                    [conv_path.target_node_id]
-                                )
+                                AssistantQuestions.get_by_ids([conv_path.target_node_id])[0].text
+                                if AssistantQuestions.get_by_ids([conv_path.target_node_id])
                                 else None
                             )  # follow up question is optional
                             possible_conv_paths.append((up, aa, aq))
 
                         up_matchings.loc[len(up_matchings)] = {
-                            "conversation": remove_last_assistant_message(conversation),
+                            "conversation": remove_last_assistant_messages(conversation),
                             "user_text": ut_query,
                             "possible_conv_paths": possible_conv_paths,
                             "match_pred": (up_pred, aa_pred, aq_pred),
@@ -387,23 +360,29 @@ def add_user_text_matching_to_df(df: pd.DataFrame, model: str = "gpt-4o"):
     """Add user text matching results as a new column to the DataFrame."""
     # convert string back to list because saving DataFrame to Excel converts lists to strings
     df["possible_conv_paths"] = df["possible_conv_paths"].apply(
-        lambda x: ast.literal_eval(x) if isinstance(x, str) else x)
+        lambda x: ast.literal_eval(x) if isinstance(x, str) else x
+    )
     match_true = []
-    
+    reasonings = []
 
     for _, row in df.iterrows():
-        match_true.append(user_text_matching(
-            row["user_text"], 
-            (row["possible_conv_paths"]), 
-            row["conversation"], 
-            row["language"],
-            model=model
-        ))
-    df['match_true'] = match_true
+        matched_user_prompt, reasoning = asyncio.run(
+            user_text_matching(
+                row["user_text"],
+                row["possible_conv_paths"],
+                row["conversation"],
+                row["language"],
+                model=model,
+            )
+        )
+        match_true.append(matched_user_prompt)
+        reasonings.append(reasoning)
+    df["match_true"] = match_true
+    df["reasoning"] = reasonings
 
 
 if __name__ == "__main__":
-    # up_matchings, ao_matchings = extract_LLM_matchings(CALL_TRANSCRIPTS_PATH)
+    up_matchings, ao_matchings = extract_LLM_matchings(CALL_TRANSCRIPTS_PATH)
     # ao_matchings.to_excel(LLM_MATCHING_AO_PATH, index=False)
     # up_matchings.to_excel(LLM_MATCHING_UP_PATH, index=False)
 
@@ -411,11 +390,8 @@ if __name__ == "__main__":
     # df = df.rename(columns={"user_prompt": "user_text"})  # Rename column
 
     df = df[df["language"] == "en"][:5]
-    add_user_text_matching_to_df(df, model="gpt-4o")
+    add_user_text_matching_to_df(df, model="gpt-4.1")
     print(df.head())
-
-
-
 
     # df = extract_embedding_matchings(CALL_TRANSCRIPTS_PATH)
     # df.to_excel(MATCHING_PATH, index=False)
