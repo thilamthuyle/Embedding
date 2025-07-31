@@ -20,7 +20,9 @@ from utils import (
     cosine_distance,
     remove_last_assistant_messages,
     user_text_matching,
+    LANGUAGES,
 )
+
 
 import vocal.common.static  # noqa: F401
 from vocal.common.embedding_utils import EmbeddingFunction
@@ -47,7 +49,7 @@ LLM_MATCHING_UP_PATH = "/www/files/llm_matching_up.xlsx"  # Path to save LLM use
 LLM_MATCHING_AO_PATH = (
     "/www/files/llm_matching_ao.xlsx"  # Path to save LLM assistant output matchings
 )
-
+UT_MATCHING_LLM_PATH = "/www/files/ut_matching_llm.xlsx"  
 
 def extract_embedding_matchings(
     call_transcripts_path: str = CALL_TRANSCRIPTS_PATH,
@@ -212,8 +214,6 @@ def extract_LLM_matchings(
         for file in assistant_dir.iterdir():
             call_id = Path(file.name).stem
 
-            # file = Path('/www/files/call_transcripts/J2gyMMqPFjLccAyocqTj/c064e4ed-9fc8-42f2-a3e1-5d104717101f.json')
-
             message_list = json.loads(file.read_text(encoding="utf-8"))
             ut_query = None
             conversation = ""
@@ -371,7 +371,7 @@ def add_user_text_matching_to_df(df: pd.DataFrame, model: str = "gpt-4o"):
                 row["user_text"],
                 row["possible_conv_paths"],
                 row["conversation"],
-                row["language"],
+                LANGUAGES[row["language"]],
                 model=model,
             )
         )
@@ -382,7 +382,7 @@ def add_user_text_matching_to_df(df: pd.DataFrame, model: str = "gpt-4o"):
 
 
 if __name__ == "__main__":
-    up_matchings, ao_matchings = extract_LLM_matchings(CALL_TRANSCRIPTS_PATH)
+    # up_matchings, ao_matchings = extract_LLM_matchings(CALL_TRANSCRIPTS_PATH)
     # ao_matchings.to_excel(LLM_MATCHING_AO_PATH, index=False)
     # up_matchings.to_excel(LLM_MATCHING_UP_PATH, index=False)
 
@@ -390,6 +390,7 @@ if __name__ == "__main__":
     # df = df.rename(columns={"user_prompt": "user_text"})  # Rename column
 
     df = df[df["language"] == "en"][:5]
+    # df = df[:20]
     add_user_text_matching_to_df(df, model="gpt-4.1")
     print(df.head())
 

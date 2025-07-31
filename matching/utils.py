@@ -1,8 +1,7 @@
-import vocal.common.static
+import vocal.common.static  # noqa: F401
 from getvocal.datamodel.sql.conversational_paths import ConversationalPaths
 import sqlmodel as sm
 import numpy as np
-import pandas as pd
 import json
 import logging
 from enum import Enum
@@ -15,16 +14,13 @@ from getvocal.datamodel.sql.user_prompts import UserPrompts
 from getvocal.datamodel.sql.assistants import DEFAULT_EMBEDDING_MODEL_PER_LANGUAGE
 
 from getvocal.multimodal.llms import chat_response
-from getvocal.multimodal.types.llms import Response
 
 
-class Language(Enum):
-    """Enum for supported languages."""
-
-    ENGLISH = "en"
-    SPANISH = "es"
-    FRENCH = "fr"
-
+LANGUAGES = {
+    "en": "english",
+    "es": "spanish",
+    "fr": "french",
+}
 
 SELECT_USER_DB_CONTEXT = """
 You are a helpful conversational assistant talking with a user over a phone call. 
@@ -121,20 +117,20 @@ def remove_last_assistant_messages(conversation: str) -> str:
 
     # Split the conversation into lines
     lines = conversation.strip().split("\n")
-    
+
     # Find the index of the last USER message
     last_user_index = -1
     for i in range(len(lines) - 1, -1, -1):
         if lines[i].startswith("USER:"):
             last_user_index = i
             break
-    
+
     # If no USER message found, return original conversation
     if last_user_index == -1:
         return conversation
-    
+
     # Keep everything up to and including the last USER message
-    return "\n".join(lines[:last_user_index + 1])
+    return "\n".join(lines[: last_user_index + 1])
 
 
 def check_normalized_text_matching(ut_query: str, user_prompt_id: str) -> bool:
@@ -182,7 +178,7 @@ async def user_text_matching(
 ) -> tuple[tuple[str, str, str] | None, str]:
     """
     Match a user text to a set of possible conversational paths using an LLM.
-    
+
     Returns:
         matched_conv_path: The selected conversational path tuple (up, aa, aq) or None if no match
         reasoning (str): The LLM's explanation for why it picked that particular answer or why no match was found
@@ -217,7 +213,9 @@ async def user_text_matching(
     try:
         response = response.output_text
         result = json.loads(response)
-        matched_user_prompt = result["output"]
+        matched_user_prompt = (
+            None if result["output"] == "none" else possible_conv_paths[int(result["output"])]
+        )
         reasoning = result["reasoning"]
         return matched_user_prompt, reasoning
     except Exception as e:
