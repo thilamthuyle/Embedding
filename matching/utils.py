@@ -213,11 +213,11 @@ async def user_text_matching(
     try:
         response = response.output_text
         result = json.loads(response)
-        matched_user_prompt = (
+        matched_conv_path = (
             None if result["output"] == "none" else possible_conv_paths[int(result["output"])]
         )
         reasoning = result["reasoning"]
-        return matched_user_prompt, reasoning
+        return matched_conv_path, reasoning
     except Exception as e:
         logging.warning(f"Failed to decode the response: {response}. Error: {e}")
         return None, None

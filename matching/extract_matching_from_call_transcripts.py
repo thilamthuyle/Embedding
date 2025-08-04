@@ -381,10 +381,11 @@ def add_user_text_matching_to_df(df: pd.DataFrame, model: str = "gpt-4o"):
     df["reasoning"] = reasonings
 
 
+
 if __name__ == "__main__":
-    # up_matchings, ao_matchings = extract_LLM_matchings(CALL_TRANSCRIPTS_PATH)
-    # ao_matchings.to_excel(LLM_MATCHING_AO_PATH, index=False)
-    # up_matchings.to_excel(LLM_MATCHING_UP_PATH, index=False)
+    up_matchings, ao_matchings = extract_LLM_matchings(CALL_TRANSCRIPTS_PATH)
+    ao_matchings.to_excel(LLM_MATCHING_AO_PATH, index=False)
+    up_matchings.to_excel(LLM_MATCHING_UP_PATH, index=False)
 
     df = pd.read_excel(LLM_MATCHING_UP_PATH)
     # df = df.rename(columns={"user_prompt": "user_text"})  # Rename column
