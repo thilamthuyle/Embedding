@@ -156,7 +156,7 @@ def check_normalized_text_matching(ut_query: str, user_prompt_id: str) -> bool:
                         ].text
                         if normalize_text(ut_query) == normalize_text(attached_user_text):
                             logging.info(
-                                f"Skipping exact match for user prompt: {ut_query} with attached user prompt: {attached_user_text}"
+                                f"Skipping exact match for user prompt: \"{ut_query}\" with attached user prompt: \"{attached_user_text}\""
                             )
                             return True
                     except IndexError as e:

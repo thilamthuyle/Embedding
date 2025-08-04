@@ -3,35 +3,33 @@
 ## Dataset Structure
 
 ```
+matching_dataset/
 ├── inputs/
 │   ├── ut_to_conv_path/
 │   │   └── <language>/
 │   │       └── <assistant_id>/
-│   │           └── <conversation_id>/
+│   │           └── <call_id>/
+│   │               ├── transcript.json  # list of messages 
 │   │               ├── 0.json
 │   │               ├── 1.json
 │   │               └── ...
-│   │
 │   └── up_to_examples/
 │       └── <conv_path_id>.json
-│
 └── outputs/
     ├── prod/
     │   └── <language>/
     │       └── <assistant_id>/
-    │           └── <conversation_id>/
+    │           └── <call_id>/
     │               ├── 0.json
     │               ├── 1.json
     │               └── ...
-    │
     ├── <prompt_id>/
     │   └── <language>_<model>/
     │       └── <assistant_id>/
-    │           └── <conversation_id>/
+    │           └── <call_id>/
     │               ├── 0.json
     │               ├── 1.json
     │               └── ...
-    │
     └── prompts/
         └── <prompt_id>.txt
 ```
@@ -39,36 +37,36 @@
 
 ## Structure of .json files 
 - `ut_to_conv_path` files:
-    ```.json
+    ```json
     {
-    "assistant_id": str,
-    "call_id": str,
-    "language": str,
-    "conversation": str,
-    "user_text": str,
-    "candidates": {
-        "up": list[str],
-        "aa": list[str],
-        "aq": list[str],
-        "conv_path_id": list[str],
-        }
+      "assistant_id": "string",
+      "call_id": "string",
+      "language": "string",
+      "conversation": "int", # index of the last USER message (which contains user_text)
+      "user_text": "string",
+      "candidates": {
+        "up": ["string"],
+        "aa": ["string"],
+        "aq": ["string"],
+        "conv_path_id": ["string"]
+      }
     }
     ```
 - `up_to_examples` files:
-    ```.json
+    ```json
     {
-    "conv_path_id": str,
-    "primary_user_prompt": str,
-    "attached_user_prompts": list[str],
+      "conv_path_id": "string",
+      "primary_user_prompt": "string",
+      "attached_user_prompts": ["string"]
     }
     ```
 - `outputs` files:
-    ```.json
+    ```json
     {
-    "up": str,
-    "aa": str,
-    "aq": str,
-    "conv_path_id": str
+      "up": "string",
+      "aa": "string",
+      "aq": "string",
+      "conv_path_id": "string"
     }
     ```
 
