@@ -230,19 +230,20 @@ def extract_up_to_examples_matching():
 if __name__ == "__main__":
     # extract_ut_to_conv_path_matching(save_to_dir="/www/files/")
 
-    call_transcript_path = Path(
-        "/www/files/call_transcripts/d37mNMstUaZwSPqtXUIJ/ef7501dd-e530-4e70-82bd-6795b17cedc6.json"
-    )
-    output_dir = Path(
-        "/www/files/matching_dataset/inputs/ut_to_conv_path/en/d37mNMstUaZwSPqtXUIJ/ef7501dd-e530-4e70-82bd-6795b17cedc6"
-    )
-    language = "en"
-    assistant_id = "d37mNMstUaZwSPqtXUIJ"
-    call_id = "ef7501dd-e530-4e70-82bd-6795b17cedc6"
-    process_call_transcript(call_transcript_path, output_dir, language, assistant_id, call_id)
+    # call_transcript_path = Path(
+    #     "/www/files/call_transcripts/d37mNMstUaZwSPqtXUIJ/ef7501dd-e530-4e70-82bd-6795b17cedc6.json"
+    # )
+    # output_dir = Path(
+    #     "/www/files/matching_dataset/inputs/ut_to_conv_path/en/d37mNMstUaZwSPqtXUIJ/ef7501dd-e530-4e70-82bd-6795b17cedc6"
+    # )
+    # language = "en"
+    # assistant_id = "d37mNMstUaZwSPqtXUIJ"
+    # call_id = "ef7501dd-e530-4e70-82bd-6795b17cedc6"
+    # process_call_transcript(call_transcript_path, output_dir, language, assistant_id, call_id)
 
-    # call_transcript_path = Path("/www/files/call_transcripts/d37mNMstUaZwSPqtXUIJ/ef7501dd-e530-4e70-82bd-6795b17cedc6.json")
-    # message_list = json.loads(call_transcript_path.read_text(encoding="utf-8"))
-    # cp_id_to_cp = get_conv_paths_by_ids(message_list)
-    # source_node_to_cp = get_conv_paths_by_source_node(list(cp_id_to_cp.values()))
-    # print(source_node_to_cp)
+    call_transcript_path = Path("/www/files/call_transcripts/d37mNMstUaZwSPqtXUIJ/ef7501dd-e530-4e70-82bd-6795b17cedc6.json")
+    message_list = json.loads(call_transcript_path.read_text(encoding="utf-8"))
+    valid_messages = filter_message_list(message_list)
+    cp_id_to_cp = get_conv_paths_by_ids(valid_messages)
+    source_node_to_cp = get_conv_paths_by_source_node(list(cp_id_to_cp.values()))
+    print(source_node_to_cp)

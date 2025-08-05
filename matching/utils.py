@@ -88,10 +88,14 @@ class Message(BaseModel):
 
 class ConvPath(BaseModel):
     id: str
-    source_node_id: str | None = None
+    source_node_id: str
     user_prompt_id: str
     assistant_answer_id: str
     target_node_id: str | None = None
+
+    @classmethod
+    def columns(cls):
+        return [sm.column(c) for c in cls.model_fields.keys()]
 
 
 def filter_message_list(message_list: list[dict]) -> list[Message]:
@@ -99,13 +103,13 @@ def filter_message_list(message_list: list[dict]) -> list[Message]:
     for message in message_list:
         try:
             filtered_messages.append(Message(**message))
-        except Exception as e:
-            logging.warning(f"Error converting message to Message model: {e}")
+        except Exception:
+            pass  # Ignore messages that cannot be parsed
 
     return filtered_messages
 
 
-def get_conv_paths_by_ids(messages: list[Message]) -> dict[str, ConversationalPaths]:
+def get_conv_paths_by_ids(messages: list[Message]) -> dict[str, ConvPath]:
     """
     Extract the matched conversational paths from the message list.
     Matched conv_paths are identified by their conv_path_id in the message matching field.
@@ -119,21 +123,21 @@ def get_conv_paths_by_ids(messages: list[Message]) -> dict[str, ConversationalPa
     for message in messages:
         if message.role == "ASSISTANT":
             conv_path_ids.add(message.matching.conv_path_id)
-    all_conv_paths = ConversationalPaths.get_by_ids(conv_path_ids)
-
-    # Remove depth 1 and Init conv_path (conv_paths without source node)
-    for conv_path in all_conv_paths[:]:  # iterate over a shallow copy
-        if not conv_path.source_node_id:
-            all_conv_paths.remove(conv_path)
-
-    cp_id_to_cp = {cp.id: cp for cp in all_conv_paths}
+    all_conv_paths = ConversationalPaths.query(
+        sm.select(*ConvPath.columns()).where(
+            ConversationalPaths.id.in_(conv_path_ids),
+            ConversationalPaths.source_node_id.is_not(None),
+        )
+    )
+    conv_paths = [ConvPath(**cp) for cp in all_conv_paths]
+    cp_id_to_cp = {cp.id: cp for cp in conv_paths}
 
     return cp_id_to_cp
 
 
 def get_conv_paths_by_source_node(
-    conv_paths: list[ConversationalPaths],
-) -> dict[str, list[ConversationalPaths]]:
+    conv_paths: list[ConvPath],
+) -> dict[str, list[ConvPath]]:
     """
     Extract all possibile conv_paths from the source nodes of given conv_paths.
     Given that all_conv_paths have source node.
@@ -144,13 +148,9 @@ def get_conv_paths_by_source_node(
         cp.source_node_id for cp in conv_paths
     }  # Make sure that each source_node_id is processed only once
     conv_paths_from_source_nodes = ConversationalPaths.query(
-        sm.select(
-            ConversationalPaths.source_node_id,
-            ConversationalPaths.user_prompt_id,
-            ConversationalPaths.assistant_answer_id,
-            ConversationalPaths.target_node_id,
-            ConversationalPaths.id,
-        ).where(ConversationalPaths.source_node_id.in_(source_node_ids))
+        sm.select(*ConvPath.columns()).where(
+            ConversationalPaths.source_node_id.in_(source_node_ids)
+        )
     )
     source_node_to_cp = defaultdict(list)
     for cp in conv_paths_from_source_nodes:
