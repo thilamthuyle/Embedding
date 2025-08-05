@@ -19,6 +19,7 @@ from getvocal.datamodel.sql.assistant_answers import AssistantAnswers
 
 
 from utils import (
+    filter_message_list,
     get_assistant_language,
     check_normalized_text_matching,
     CALL_TRANSCRIPTS_DIR,
@@ -98,7 +99,8 @@ def process_call_transcript(
     # logging.info(f"Processing call transcript: {call_transcript_path}")
 
     message_list = json.loads(call_transcript_path.read_text(encoding="utf-8"))
-    cp_id_to_cp = get_conv_paths_by_ids(message_list)
+    valid_messages = filter_message_list(message_list)
+    cp_id_to_cp = get_conv_paths_by_ids(valid_messages)
     source_node_to_cp = get_conv_paths_by_source_node(list(cp_id_to_cp.values()))
 
     conversation = []
@@ -106,10 +108,8 @@ def process_call_transcript(
     user_text_idx = -1
     matching_id = 0
 
-    for idx, message in enumerate(message_list):
-        message = Message(**message)  # convert dict to Message model
+    for idx, message in enumerate(valid_messages):
         conversation.append({"role": message.role, "text": message.text})
-
         # Get user_text query
         if message.role == "USER":
             user_text = message.text  # live transcription
@@ -119,12 +119,7 @@ def process_call_transcript(
             continue
 
         # Make sure that the message has an unseen user prompt matching
-        if (
-            not message.matching
-            or not message.matching.distance
-            or not message.matching.conv_path_id
-            or message.matching.conv_path_id in seen_conv_path_ids
-        ):
+        if message.matching.conv_path_id in seen_conv_path_ids:
             continue
 
         ### TODO: Check initial messages (with §INIT§)
@@ -160,7 +155,9 @@ def process_call_transcript(
 
         candidates["up"] = [up.text for up in all_ups]
         candidates["aa"] = [aa.text for aa in all_aas]
-        candidates["aq"] = [aq.text if aq else None for aq in all_aqs]  # follow up question is optional
+        candidates["aq"] = [
+            aq.text if aq else None for aq in all_aqs
+        ]  # follow up question is optional
 
         # Save matching into .json file
         save_matching_to_json(
@@ -180,7 +177,9 @@ def process_call_transcript(
     if matching_id > 0:
         Path(f"{output_dir}/transcript.json").write_text(json.dumps(conversation), encoding="utf-8")
 
-    logging.info(f"Processed call transcript: {assistant_id} | {call_id} with {len(cp_id_to_cp)} matchings.")
+    logging.info(
+        f"Processed call transcript: {assistant_id} | {call_id} with {len(cp_id_to_cp)} matchings."
+    )
 
 
 def extract_ut_to_conv_path_matching(
@@ -229,12 +228,21 @@ def extract_up_to_examples_matching():
 
 
 if __name__ == "__main__":
-    extract_ut_to_conv_path_matching(save_to_dir="/www/files/")
+    # extract_ut_to_conv_path_matching(save_to_dir="/www/files/")
 
+    call_transcript_path = Path(
+        "/www/files/call_transcripts/d37mNMstUaZwSPqtXUIJ/ef7501dd-e530-4e70-82bd-6795b17cedc6.json"
+    )
+    output_dir = Path(
+        "/www/files/matching_dataset/inputs/ut_to_conv_path/en/d37mNMstUaZwSPqtXUIJ/ef7501dd-e530-4e70-82bd-6795b17cedc6"
+    )
+    language = "en"
+    assistant_id = "d37mNMstUaZwSPqtXUIJ"
+    call_id = "ef7501dd-e530-4e70-82bd-6795b17cedc6"
+    process_call_transcript(call_transcript_path, output_dir, language, assistant_id, call_id)
 
     # call_transcript_path = Path("/www/files/call_transcripts/d37mNMstUaZwSPqtXUIJ/ef7501dd-e530-4e70-82bd-6795b17cedc6.json")
     # message_list = json.loads(call_transcript_path.read_text(encoding="utf-8"))
     # cp_id_to_cp = get_conv_paths_by_ids(message_list)
     # source_node_to_cp = get_conv_paths_by_source_node(list(cp_id_to_cp.values()))
     # print(source_node_to_cp)
-

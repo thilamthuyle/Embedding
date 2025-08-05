@@ -9,7 +9,7 @@ matching_dataset/
 │   │   └── <language>/
 │   │       └── <assistant_id>/
 │   │           └── <call_id>/
-│   │               ├── transcript.json  # list of messages 
+│   │               ├── conversation.json  # list of messages 
 │   │               ├── 0.json
 │   │               ├── 1.json
 │   │               └── ...

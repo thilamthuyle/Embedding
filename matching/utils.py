@@ -74,8 +74,8 @@ If there is no match with what the speaker has said, then
 
 
 class Matching(BaseModel):
-    distance: float | None = None
-    conv_path_id: str | None = None
+    distance: float
+    conv_path_id: str
     original: str | None = None
 
 
@@ -83,7 +83,7 @@ class Message(BaseModel):
     role: str
     text: str
     source: str
-    matching: Matching | None = None
+    matching: Matching
 
 
 class ConvPath(BaseModel):
@@ -94,25 +94,30 @@ class ConvPath(BaseModel):
     target_node_id: str | None = None
 
 
-def get_conv_paths_by_ids(message_list: list) -> dict[str, ConversationalPaths]:
+def filter_message_list(message_list: list[dict]) -> list[Message]:
+    filtered_messages = []
+    for message in message_list:
+        try:
+            filtered_messages.append(Message(**message))
+        except Exception as e:
+            logging.warning(f"Error converting message to Message model: {e}")
+
+    return filtered_messages
+
+
+def get_conv_paths_by_ids(messages: list[Message]) -> dict[str, ConversationalPaths]:
     """
     Extract the matched conversational paths from the message list.
     Matched conv_paths are identified by their conv_path_id in the message matching field.
-    Remove Init conv_path and depth 1 conv_path (conv_paths without source node) and keep 
+    Remove Init conv_path and depth 1 conv_path (conv_paths without source node) and keep
     only depth 2 conv_path.
     Return:
         cp_id_to_cp: conv_path_id -> conv_path dictionary
     """
     # Get from DB all_conv_paths with conv_path_id in message list
     conv_path_ids = set()  # Make sure that each conv_path_id is processed only once
-    for message in message_list:  
-        message = Message(**message)
-        if (
-            message.role == "ASSISTANT"
-            and message.matching is not None
-            and message.matching.distance is not None
-            and message.matching.conv_path_id is not None
-        ):
+    for message in messages:
+        if message.role == "ASSISTANT":
             conv_path_ids.add(message.matching.conv_path_id)
     all_conv_paths = ConversationalPaths.get_by_ids(conv_path_ids)
 
@@ -149,7 +154,7 @@ def get_conv_paths_by_source_node(
     )
     source_node_to_cp = defaultdict(list)
     for cp in conv_paths_from_source_nodes:
-        cp = ConvPath(**cp) 
+        cp = ConvPath(**cp)
         source_node_to_cp[cp.source_node_id].append(cp)
 
     return source_node_to_cp
