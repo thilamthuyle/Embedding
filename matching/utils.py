@@ -118,11 +118,13 @@ def get_conv_paths_by_ids(messages: list[Message]) -> dict[str, ConvPath]:
     Return:
         cp_id_to_cp: conv_path_id -> conv_path dictionary
     """
-    # Get from DB all_conv_paths with conv_path_id in message list
+    # Get all conv_path_ids in message list
     conv_path_ids = set()  # Make sure that each conv_path_id is processed only once
     for message in messages:
         if message.role == "ASSISTANT":
             conv_path_ids.add(message.matching.conv_path_id)
+    
+    # Query DB and select only depth 2 conv_paths, meaning those with source node
     all_conv_paths = ConversationalPaths.query(
         sm.select(*ConvPath.columns()).where(
             ConversationalPaths.id.in_(conv_path_ids),

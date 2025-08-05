@@ -118,12 +118,12 @@ def process_call_transcript(
                 user_text_idx = idx
             continue
 
-        # Make sure that the message has an unseen user prompt matching
-        if message.matching.conv_path_id in seen_conv_path_ids:
+        # Make sure that message contains an unseen depth 2 matching 
+        if (
+            message.matching.conv_path_id not in cp_id_to_cp
+            or message.matching.conv_path_id in seen_conv_path_ids
+        ):
             continue
-
-        ### TODO: Check initial messages (with §INIT§)
-        ### TODO: Proceed only if conv_path_id in cp_id_to_cp
 
         conv_path_id = message.matching.conv_path_id
         seen_conv_path_ids.add(conv_path_id)
@@ -241,7 +241,9 @@ if __name__ == "__main__":
     # call_id = "ef7501dd-e530-4e70-82bd-6795b17cedc6"
     # process_call_transcript(call_transcript_path, output_dir, language, assistant_id, call_id)
 
-    call_transcript_path = Path("/www/files/call_transcripts/d37mNMstUaZwSPqtXUIJ/ef7501dd-e530-4e70-82bd-6795b17cedc6.json")
+    call_transcript_path = Path(
+        "/www/files/call_transcripts/d37mNMstUaZwSPqtXUIJ/ef7501dd-e530-4e70-82bd-6795b17cedc6.json"
+    )
     message_list = json.loads(call_transcript_path.read_text(encoding="utf-8"))
     valid_messages = filter_message_list(message_list)
     cp_id_to_cp = get_conv_paths_by_ids(valid_messages)
