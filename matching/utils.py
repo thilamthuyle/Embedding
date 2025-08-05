@@ -15,6 +15,8 @@ from getvocal.datamodel.sql.assistants import DEFAULT_EMBEDDING_MODEL_PER_LANGUA
 
 from getvocal.multimodal.llms import chat_response
 
+CALL_TRANSCRIPTS_DIR = "/www/files/call_transcripts"  
+
 
 LANGUAGES = {
     "en": "english",
@@ -221,3 +223,5 @@ async def user_text_matching(
     except Exception as e:
         logging.warning(f"Failed to decode the response: {response}. Error: {e}")
         return None, None
+
+#----------

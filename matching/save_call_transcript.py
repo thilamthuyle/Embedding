@@ -14,7 +14,9 @@ from getvocal.datamodel.sql.assistants import Assistants
 import vocal.common.static  # noqa: E402,F401
 from vocal.common.settings import DatabaseSettings
 
-CALL_TRANSCRIPTS_PATH = "/www/files/call_transcripts"  # Path to save call transcripts
+
+
+from utils import CALL_TRANSCRIPTS_DIR
 
 print("Loading environment variables...")
 print(f"Database settings: {DatabaseSettings()}")
@@ -58,4 +60,4 @@ if __name__ == "__main__":
     for assistant in list_assistants:
         if assistant.settings.version != "prod":
             continue
-        save_call_transcript_json(assistant, num_calls=2, save_dir=CALL_TRANSCRIPTS_PATH)
+        save_call_transcript_json(assistant, num_calls=2, save_dir=CALL_TRANSCRIPTS_DIR)
