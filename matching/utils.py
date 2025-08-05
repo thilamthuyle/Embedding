@@ -1,21 +1,25 @@
 import vocal.common.static  # noqa: F401
-from getvocal.datamodel.sql.conversational_paths import ConversationalPaths
+
 import sqlmodel as sm
 import numpy as np
 import json
 import logging
-from enum import Enum
+from pydantic import BaseModel
+from collections import defaultdict
+from pathlib import Path
+
 from vocal.common.utils import normalize_text
 from vocal.chat_engine.utils import remove_guards
 from getvocal.datamodel.sql.assistants import Assistants
 from getvocal.datamodel.sql.assistant_texts import AssistantTexts
 from getvocal.datamodel.sql.assistant_questions import AssistantQuestions
 from getvocal.datamodel.sql.user_prompts import UserPrompts
+from getvocal.datamodel.sql.conversational_paths import ConversationalPaths
 from getvocal.datamodel.sql.assistants import DEFAULT_EMBEDDING_MODEL_PER_LANGUAGE
 
 from getvocal.multimodal.llms import chat_response
 
-CALL_TRANSCRIPTS_DIR = "/www/files/call_transcripts"  
+CALL_TRANSCRIPTS_DIR = "/www/files/call_transcripts"
 
 
 LANGUAGES = {
@@ -69,6 +73,115 @@ If there is no match with what the speaker has said, then
 """
 
 
+class Matching(BaseModel):
+    distance: float | None = None
+    conv_path_id: str | None = None
+    original: str | None = None
+
+
+class Message(BaseModel):
+    role: str
+    text: str
+    source: str
+    matching: Matching | None = None
+
+
+class ConvPath(BaseModel):
+    id: str
+    source_node_id: str | None = None
+    user_prompt_id: str
+    assistant_answer_id: str
+    target_node_id: str | None = None
+
+
+def get_conv_paths_by_ids(message_list: list) -> dict[str, ConversationalPaths]:
+    """
+    Extract the matched conversational paths from the message list.
+    Matched conv_paths are identified by their conv_path_id in the message matching field.
+    Remove Init conv_path and depth 1 conv_path (conv_paths without source node) and keep 
+    only depth 2 conv_path.
+    Return:
+        cp_id_to_cp: conv_path_id -> conv_path dictionary
+    """
+    # Get from DB all_conv_paths with conv_path_id in message list
+    conv_path_ids = set()  # Make sure that each conv_path_id is processed only once
+    for message in message_list:  
+        message = Message(**message)
+        if (
+            message.role == "ASSISTANT"
+            and message.matching is not None
+            and message.matching.distance is not None
+            and message.matching.conv_path_id is not None
+        ):
+            conv_path_ids.add(message.matching.conv_path_id)
+    all_conv_paths = ConversationalPaths.get_by_ids(conv_path_ids)
+
+    # Remove depth 1 and Init conv_path (conv_paths without source node)
+    for conv_path in all_conv_paths[:]:  # iterate over a shallow copy
+        if not conv_path.source_node_id:
+            all_conv_paths.remove(conv_path)
+
+    cp_id_to_cp = {cp.id: cp for cp in all_conv_paths}
+
+    return cp_id_to_cp
+
+
+def get_conv_paths_by_source_node(
+    conv_paths: list[ConversationalPaths],
+) -> dict[str, list[ConversationalPaths]]:
+    """
+    Extract all possibile conv_paths from the source nodes of given conv_paths.
+    Given that all_conv_paths have source node.
+    Return:
+        source_node_to_cp: source_node_id -> list of conv paths from source node dictionary
+    """
+    source_node_ids = {
+        cp.source_node_id for cp in conv_paths
+    }  # Make sure that each source_node_id is processed only once
+    conv_paths_from_source_nodes = ConversationalPaths.query(
+        sm.select(
+            ConversationalPaths.source_node_id,
+            ConversationalPaths.user_prompt_id,
+            ConversationalPaths.assistant_answer_id,
+            ConversationalPaths.target_node_id,
+            ConversationalPaths.id,
+        ).where(ConversationalPaths.source_node_id.in_(source_node_ids))
+    )
+    source_node_to_cp = defaultdict(list)
+    for cp in conv_paths_from_source_nodes:
+        cp = ConvPath(**cp) 
+        source_node_to_cp[cp.source_node_id].append(cp)
+
+    return source_node_to_cp
+
+
+def save_matching_to_json(
+    output_dir: Path,
+    language: str,
+    assistant_id: str,
+    call_id: str,
+    matching_id: int,
+    user_text: str,
+    user_text_idx: int,
+    candidates: dict[str, list[str]],
+):
+    matching = {
+        "assistant_id": assistant_id,
+        "call_id": call_id,
+        "language": language,
+        "user_text": user_text,
+        "user_text_idx": user_text_idx,
+        "candidates": candidates,
+    }
+    output_dir.mkdir(parents=True, exist_ok=True)
+    file_path = Path(f"{output_dir}/{matching_id}.json")
+    file_path.write_text(json.dumps(matching), encoding="utf-8")
+    logging.info(f"Saved matching to {file_path}")
+
+
+# -----------
+
+
 def get_user_prompt_id_from_source_node(source_node_id: str) -> list[str]:
     user_prompt_ids = []
     conv_paths = ConversationalPaths.query(
@@ -110,31 +223,6 @@ def get_questions_by_assistant(assistant_id: str) -> list[str]:
     return [question.text for question in assistant_questions]
 
 
-def remove_last_assistant_messages(conversation: str) -> str:
-    """
-    Remove all assistant messages after the last user message from the conversation string.
-    """
-    if not conversation:
-        return conversation
-
-    # Split the conversation into lines
-    lines = conversation.strip().split("\n")
-
-    # Find the index of the last USER message
-    last_user_index = -1
-    for i in range(len(lines) - 1, -1, -1):
-        if lines[i].startswith("USER:"):
-            last_user_index = i
-            break
-
-    # If no USER message found, return original conversation
-    if last_user_index == -1:
-        return conversation
-
-    # Keep everything up to and including the last USER message
-    return "\n".join(lines[: last_user_index + 1])
-
-
 def check_normalized_text_matching(ut_query: str, user_prompt_id: str) -> bool:
     """
     Check exact matching between a user text and a user prompt by ID.
@@ -158,7 +246,7 @@ def check_normalized_text_matching(ut_query: str, user_prompt_id: str) -> bool:
                         ].text
                         if normalize_text(ut_query) == normalize_text(attached_user_text):
                             logging.info(
-                                f"Skipping exact match for user prompt: \"{ut_query}\" with attached user prompt: \"{attached_user_text}\""
+                                f'Skipping exact match for user prompt: "{ut_query}" with attached user prompt: "{attached_user_text}"'
                             )
                             return True
                     except IndexError as e:
@@ -223,5 +311,3 @@ async def user_text_matching(
     except Exception as e:
         logging.warning(f"Failed to decode the response: {response}. Error: {e}")
         return None, None
-
-#----------

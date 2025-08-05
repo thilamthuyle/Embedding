@@ -39,11 +39,11 @@ matching_dataset/
 - `ut_to_conv_path` files:
     ```json
     {
+      "language": "string",
       "assistant_id": "string",
       "call_id": "string",
-      "language": "string",
-      "conversation": "int", # index of the last USER message (which contains user_text)
       "user_text": "string",
+      "user_text_idx": "int", # index of the user_text message in the conversation (in transcript.json)
       "candidates": {
         "up": ["string"],
         "aa": ["string"],
