@@ -94,7 +94,7 @@ def process_call_transcript(
     assistant_id: str,
     call_id: str,
 ) -> None:
-    logging.info(f"Start processing call transcript: {assistant_id}/{call_id}") 
+    logging.debug(f"Start processing call transcript: {assistant_id} / {call_id}") 
 
     all_messages = json.loads(call_transcript_path.read_text(encoding="utf-8"))
     messages_with_up_matching, messages_with_up_matching_idx = filter_messages_with_up_matching(
@@ -148,7 +148,11 @@ def process_call_transcript(
             conv_path.source_node_id, conv_paths_from_source_nodes_dict
         )
 
-        # Save matching into .json file
+        # Remove matchings with §NO_NEED§ in user prompt candidates
+        if not candidates:
+            logging.debug("Remove matching with §NO_NEED§ in user prompt candidates")
+            continue
+        
         save_matching_to_json(
             output_dir,
             language,
@@ -163,12 +167,12 @@ def process_call_transcript(
         seen_conv_path_ids.add(conv_path_id)
         matching_id += 1
 
-    # Save conversation into .json file only if there is at least one matching
+    # Save conversation only if there is at least one matching
     if matching_id > 0:
         Path(f"{output_dir}/conversation.json").write_text(json.dumps(conversation), encoding="utf-8")
 
     logging.info(
-        f"Processed call transcript: {assistant_id}/{call_id} with {len(depth2_conv_paths_by_ids_dict)} matchings."
+        f"Processed call transcript: {assistant_id} / {call_id} with {matching_id} matchings."
     )
 
 
@@ -193,8 +197,8 @@ def extract_ut_to_conv_path_matching(
                 f"{save_to_dir}/matching_dataset/inputs/ut_to_conv_path/{language}/{assistant_id}/{call_id}"
             )
 
-            if Path(f"{output_dir}/transcript.json").exists():
-                logging.info(f"File {call_transcript_path} has already been processed, skipping...")
+            if Path(f"{output_dir}/conversation.json").exists():
+                logging.debug(f"File {call_transcript_path} has already been processed, skipping...")
                 continue
 
             arguments_list.append(
@@ -219,6 +223,10 @@ def extract_up_to_examples_matching():
 
 if __name__ == "__main__":
     extract_ut_to_conv_path_matching(save_to_dir="/www/files/")
+
+    # call_transcript_path = Path("/www/files/call_transcripts/bzzd3IuANPMYYsitiBlo/12c8a927-94be-48fe-9fe0-c626f38584a5.json")
+    # output_dir = Path("/www/files/matching_dataset/inputs/ut_to_conv_path/test/bzzd3IuANPMYYsitiBlo/12c8a927-94be-48fe-9fe0-c626f38584a5")
+    # process_call_transcript(call_transcript_path, output_dir, "test", "bzzd3IuANPMYYsitiBlo", "12c8a927-94be-48fe-9fe0-c626f38584a5")
 
     # call_transcript_path = Path(
     #     "/www/files/call_transcripts/d37mNMstUaZwSPqtXUIJ/ef7501dd-e530-4e70-82bd-6795b17cedc6.json"

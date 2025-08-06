@@ -178,6 +178,7 @@ def extract_matching_candidates_from_source_node(
 ) -> dict[str, list[str]]:
     """
     Extract all possibile conv_paths from the source node.
+    If any of the user prompts contains §NO_NEED*§, return None.
     Return:
         candidates: dictionary with keys "up", "aa", "aq", "conv_path_id" and values as lists of texts or IDs
     """
@@ -208,6 +209,10 @@ def extract_matching_candidates_from_source_node(
     existing_ups_dict = {up["id"]: up["text"] for up in existing_ups}
     existing_aas_dict = {aa["id"]: aa["text"] for aa in existing_aas}
     existing_aqs_dict = {aq["id"]: aq["text"] for aq in existing_aqs}
+
+    # Remove all matchings with §NO_NEED*§ in up candidates
+    if any("NO_NEED" in up for up in existing_ups_dict.values()):
+        return None
 
     for i in range(num_conv_paths):
         if (
@@ -244,7 +249,7 @@ def save_matching_to_json(
     output_dir.mkdir(parents=True, exist_ok=True)
     file_path = Path(f"{output_dir}/{matching_id}.json")
     file_path.write_text(json.dumps(matching), encoding="utf-8")
-    logging.info(f"Saved matching to {file_path}")
+    logging.debug(f"Saved matching to {file_path}")
 
 
 def check_normalized_text_matching(ut_query: str, user_prompt_id: str) -> bool:
@@ -254,7 +259,7 @@ def check_normalized_text_matching(ut_query: str, user_prompt_id: str) -> bool:
         - if user prompt is primary, check attached (secondary) user prompts and compare their texts with user text
     """
     try:
-        user_prompt = UserPrompts.get_by_ids([user_prompt_id])[0]
+        user_prompt = UserPrompts.get(user_prompt_id)
         if user_prompt.primary_id:  # If the user prompt is secondary, get its text
             ut_match = user_prompt.text
             return normalize_text(ut_query) == normalize_text(ut_match)
@@ -269,7 +274,7 @@ def check_normalized_text_matching(ut_query: str, user_prompt_id: str) -> bool:
                             0
                         ].text
                         if normalize_text(ut_query) == normalize_text(attached_user_text):
-                            logging.info(
+                            logging.debug(
                                 f'Skipping exact match for user prompt: "{ut_query}" with attached user prompt: "{attached_user_text}"'
                             )
                             return True
@@ -364,5 +369,5 @@ async def user_text_matching(
         reasoning = result["reasoning"]
         return matched_conv_path, reasoning
     except Exception as e:
-        logging.warning(f"Failed to decode the response: {response}. Error: {e}")
+        logging.debug(f"Failed to decode the response: {response}. Error: {e}")
         return None, None
