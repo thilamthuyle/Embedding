@@ -13,7 +13,6 @@ from vocal.common.utils import normalize_text
 from vocal.chat_engine.utils import remove_guards
 from getvocal.datamodel.sql.user_prompts import UserPrompts
 from getvocal.datamodel.sql.assistants import Assistants
-from getvocal.datamodel.sql.assistant_texts import AssistantTexts
 from getvocal.datamodel.sql.assistant_questions import AssistantQuestions
 from getvocal.datamodel.sql.assistant_answers import AssistantAnswers
 from getvocal.datamodel.sql.conversational_paths import ConversationalPaths
@@ -76,18 +75,6 @@ If there is no match with what the speaker has said, then
 """
 
 
-class Matching(BaseModel):
-    distance: float
-    conv_path_id: str
-    original: str | None = None
-
-
-class Message(BaseModel):
-    role: str
-    text: str
-    matching: Matching
-
-
 class ConvPath(BaseModel):
     id: str
     source_node_id: str
@@ -98,6 +85,18 @@ class ConvPath(BaseModel):
     @classmethod
     def columns(cls):
         return [sm.column(c) for c in cls.model_fields.keys()]
+
+
+class Matching(BaseModel):
+    distance: float
+    conv_path_id: str
+    original: str | None = None
+
+
+class Message(BaseModel):
+    role: str
+    text: str
+    matching: Matching
 
 
 def filter_messages_with_up_matching(message_list: list[dict]) -> tuple[list[Message], list[int]]:
@@ -182,26 +181,44 @@ def extract_matching_candidates_from_source_node(
     Return:
         candidates: dictionary with keys "up", "aa", "aq", "conv_path_id" and values as lists of texts or IDs
     """
-    candidates = {"up": [], "aa": [], "aq": [], "conv_path_id": []}
     conv_paths_from_source_node = conv_paths_from_source_nodes_dict[source_node_id]
+    num_conv_paths = len(conv_paths_from_source_node)
+
+    candidates = {"up": [], "aa": [], "aq": [], "conv_path_id": []}
     up_ids, aa_ids, aq_ids = [], [], []
+
     for conv_path in conv_paths_from_source_node:
-        candidates["conv_path_id"].append(conv_path.id)
         up_ids.append(conv_path.user_prompt_id)
         aa_ids.append(conv_path.assistant_answer_id)
         aq_ids.append(conv_path.target_node_id)
 
-    ups = UserPrompts.query(sm.select(UserPrompts.text).where(UserPrompts.id.in_(up_ids)))
-    aas = AssistantAnswers.query(
-        sm.select(AssistantAnswers.text).where(AssistantAnswers.id.in_(aa_ids))
+    # Note that not all ids may be present in the DB, so the number of retrieved texts may be less than num_conv_paths
+    existing_ups = UserPrompts.query(
+        sm.select(UserPrompts.id, UserPrompts.text).where(UserPrompts.id.in_(up_ids))
     )
-    aqs = AssistantQuestions.query(
-        sm.select(AssistantQuestions.text).where(AssistantQuestions.id.in_(aq_ids))
+    existing_aas = AssistantAnswers.query(
+        sm.select(AssistantAnswers.id, AssistantAnswers.text).where(AssistantAnswers.id.in_(aa_ids))
+    )
+    existing_aqs = AssistantQuestions.query(
+        sm.select(AssistantQuestions.id, AssistantQuestions.text).where(
+            AssistantQuestions.id.in_(aq_ids)
+        )
     )
 
-    candidates["up"] = [up.text for up in ups]
-    candidates["aa"] = [aa.text for aa in aas]
-    candidates["aq"] = [aq.text if aq else None for aq in aqs]  # follow up question is optional
+    existing_ups_dict = {up["id"]: up["text"] for up in existing_ups}
+    existing_aas_dict = {aa["id"]: aa["text"] for aa in existing_aas}
+    existing_aqs_dict = {aq["id"]: aq["text"] for aq in existing_aqs}
+
+    for i in range(num_conv_paths):
+        if (
+            up_ids[i] in existing_ups_dict.keys()
+            and aa_ids[i] in existing_aas_dict.keys()
+            and (not aq_ids[i] or aq_ids[i] in existing_aqs_dict.keys()) # follow up question is optional
+        ):
+            candidates["up"].append(existing_ups_dict[up_ids[i]])
+            candidates["aa"].append(existing_aas_dict[aa_ids[i]])
+            candidates["aq"].append(existing_aqs_dict[aq_ids[i]] if aq_ids[i] else None) 
+            candidates["conv_path_id"].append(conv_paths_from_source_node[i].id)
 
     return candidates
 
@@ -228,38 +245,6 @@ def save_matching_to_json(
     file_path = Path(f"{output_dir}/{matching_id}.json")
     file_path.write_text(json.dumps(matching), encoding="utf-8")
     logging.info(f"Saved matching to {file_path}")
-
-
-# -----------
-
-
-def get_user_prompt_id_from_source_node(source_node_id: str) -> list[str]:
-    user_prompt_ids = []
-    conv_paths = ConversationalPaths.query(
-        sm.select(ConversationalPaths).where(ConversationalPaths.source_node_id == source_node_id)
-    )
-    for conv_path in conv_paths:
-        user_prompt_ids.append(conv_path.user_prompt_id)
-
-    return user_prompt_ids
-
-
-def get_assistant_language(assistant_id: str) -> str:
-    assistant = Assistants.get_by_ids([assistant_id])
-    return assistant[0].language
-
-
-def get_default_embedding_model(language: str) -> str:
-    if language in DEFAULT_EMBEDDING_MODEL_PER_LANGUAGE.keys():
-        return DEFAULT_EMBEDDING_MODEL_PER_LANGUAGE[language]
-    return DEFAULT_EMBEDDING_MODEL_PER_LANGUAGE["others"]
-
-
-def cosine_distance(v1: list[float], v2: list[float]) -> float:
-    cos_sim = np.dot(v1, v2) / (np.linalg.norm(v1) * np.linalg.norm(v2))
-    return 1 - cos_sim
-
-
 
 
 def check_normalized_text_matching(ut_query: str, user_prompt_id: str) -> bool:
@@ -296,6 +281,37 @@ def check_normalized_text_matching(ut_query: str, user_prompt_id: str) -> bool:
     except IndexError as e:
         logging.debug(f"Error retrieving user prompt: {user_prompt_id}.")
         return False
+
+
+
+# -----------
+
+
+def get_user_prompt_id_from_source_node(source_node_id: str) -> list[str]:
+    user_prompt_ids = []
+    conv_paths = ConversationalPaths.query(
+        sm.select(ConversationalPaths).where(ConversationalPaths.source_node_id == source_node_id)
+    )
+    for conv_path in conv_paths:
+        user_prompt_ids.append(conv_path.user_prompt_id)
+
+    return user_prompt_ids
+
+
+def get_assistant_language(assistant_id: str) -> str:
+    assistant = Assistants.get_by_ids([assistant_id])
+    return assistant[0].language
+
+
+def get_default_embedding_model(language: str) -> str:
+    if language in DEFAULT_EMBEDDING_MODEL_PER_LANGUAGE.keys():
+        return DEFAULT_EMBEDDING_MODEL_PER_LANGUAGE[language]
+    return DEFAULT_EMBEDDING_MODEL_PER_LANGUAGE["others"]
+
+
+def cosine_distance(v1: list[float], v2: list[float]) -> float:
+    cos_sim = np.dot(v1, v2) / (np.linalg.norm(v1) * np.linalg.norm(v2))
+    return 1 - cos_sim
 
 
 async def user_text_matching(

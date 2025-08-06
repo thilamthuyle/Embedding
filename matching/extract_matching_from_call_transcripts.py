@@ -24,6 +24,7 @@ from utils import (
     get_conv_paths_from_source_nodes_dict,
     save_matching_to_json,
     extract_matching_candidates_from_source_node,
+    Message,
 )
 # get_default_embedding_model,
 # cosine_distance,
@@ -93,13 +94,14 @@ def process_call_transcript(
     assistant_id: str,
     call_id: str,
 ) -> None:
-    # logging.info(f"Processing call transcript: {call_transcript_path}")
+    logging.info(f"Start processing call transcript: {assistant_id}/{call_id}") 
 
     all_messages = json.loads(call_transcript_path.read_text(encoding="utf-8"))
     messages_with_up_matching, messages_with_up_matching_idx = filter_messages_with_up_matching(
         all_messages
     )
     depth2_conv_paths_by_ids_dict = get_depth2_conv_paths_by_ids_dict(messages_with_up_matching)
+    depth2_conv_path_ids = depth2_conv_paths_by_ids_dict.keys()
     conv_paths_from_source_nodes_dict = get_conv_paths_from_source_nodes_dict(
         list(depth2_conv_paths_by_ids_dict.values())
     )
@@ -107,26 +109,31 @@ def process_call_transcript(
     conversation = []
     seen_conv_path_ids = set()
     user_text_idx = -1
+
     matching_id = 0
 
     for idx, message in enumerate(all_messages):
         conversation.append({"role": message["role"], "text": message["text"]})
 
         # Make sure that
-        conv_path_id = messages_with_up_matching[matching_id].matching.conv_path_id
-        if (
-            idx != messages_with_up_matching_idx[matching_id]     # the current message contains matching
-            or conv_path_id not in depth2_conv_paths_by_ids_dict  # the matching is depth 2
-            or conv_path_id in seen_conv_path_ids                 # the conv_path was not processed yet
-        ):
+        try:
+            message = Message(**message)
+            conv_path_id = message.matching.conv_path_id
+            if (
+                idx not in messages_with_up_matching_idx  # the current message contains matching
+                or conv_path_id not in depth2_conv_path_ids  # matching is depth 2
+                or conv_path_id in seen_conv_path_ids  # and conv_path_id was not processed yet
+            ):
+                continue
+        except Exception:
             continue
 
         # Get user_text from the message before the matching message
         user_text_idx = idx - 1
-        user_text = all_messages[user_text_idx].text  # live transcription
+        user_text = all_messages[user_text_idx]["text"]  # live transcription
         try:
-            user_text = all_messages[user_text_idx].matching.original  # offline transcription
-        except AttributeError:
+            user_text = all_messages[user_text_idx]["matching"]["original"]  # offline transcription
+        except KeyError:
             pass
 
         # Skip exact matching
@@ -158,10 +165,10 @@ def process_call_transcript(
 
     # Save conversation into .json file only if there is at least one matching
     if matching_id > 0:
-        Path(f"{output_dir}/transcript.json").write_text(json.dumps(conversation), encoding="utf-8")
+        Path(f"{output_dir}/conversation.json").write_text(json.dumps(conversation), encoding="utf-8")
 
     logging.info(
-        f"Processed call transcript: {assistant_id} | {call_id} with {len(depth2_conv_paths_by_ids_dict)} matchings."
+        f"Processed call transcript: {assistant_id}/{call_id} with {len(depth2_conv_paths_by_ids_dict)} matchings."
     )
 
 
@@ -211,7 +218,7 @@ def extract_up_to_examples_matching():
 
 
 if __name__ == "__main__":
-    # extract_ut_to_conv_path_matching(save_to_dir="/www/files/")
+    extract_ut_to_conv_path_matching(save_to_dir="/www/files/")
 
     # call_transcript_path = Path(
     #     "/www/files/call_transcripts/d37mNMstUaZwSPqtXUIJ/ef7501dd-e530-4e70-82bd-6795b17cedc6.json"
@@ -224,24 +231,47 @@ if __name__ == "__main__":
     # call_id = "ef7501dd-e530-4e70-82bd-6795b17cedc6"
     # process_call_transcript(call_transcript_path, output_dir, language, assistant_id, call_id)
 
-    call_transcript_path = Path(
-        "/www/files/call_transcripts/d37mNMstUaZwSPqtXUIJ/ef7501dd-e530-4e70-82bd-6795b17cedc6.json"
-    )
-    all_messages = json.loads(call_transcript_path.read_text(encoding="utf-8"))
-    messages_with_up_matching, messages_with_up_matching_idx = filter_messages_with_up_matching(
-        all_messages
-    )
-    depth2_conv_paths_by_ids_dict = get_depth2_conv_paths_by_ids_dict(messages_with_up_matching)
-    conv_paths_from_source_nodes = get_conv_paths_from_source_nodes_dict(
-        list(depth2_conv_paths_by_ids_dict.values())
-    )
-    process_call_transcript(
-        call_transcript_path,
-        output_dir=Path(
-            "/www/files/matching_dataset/en/d37mNMstUaZwSPqtXUIJ/ef7501dd-e530-4e70-82bd-6795b17cedc6"
-        ),
-        language="en",
-        assistant_id="d37mNMstUaZwSPqtXUIJ",
-        call_id="ef7501dd-e530-4e70-82bd-6795b17cedc6",
-    )
-    print(source_node_to_cp)
+    ######
+    # from getvocal.datamodel.sql.conversational_paths import ConversationalPaths
+    # from utils import ConvPath
+
+    # source_node_id = "6f9f88344d8d9ed41aa94da2644e121c"
+    # conv_paths_from_source_nodes_dict = get_conv_paths_from_source_nodes_dict(
+    #     [ConversationalPaths.get("6f9f88344d8d9ed41aa94da2644e121c_a9226fc4c9693896251ff045797b9d27_76fb41c902d6f8cb30f7a6bbcb7fc20c_bc05ab88b87e67c06cadf44895c07c1f")]
+    # )
+    # candidates = extract_matching_candidates_from_source_node(source_node_id, conv_paths_from_source_nodes_dict)
+    # save_matching_to_json(output_dir=Path(
+    #         "/www/files/matching_dataset/en/d37mNMstUaZwSPqtXUIJ/ef7501dd-e530-4e70-82bd-6795b17cedc6"
+    #     ),
+    #     language="en",
+    #     assistant_id="d37mNMstUaZwSPqtXUIJ",
+    #     call_id="ef7501dd-e530-4e70-82bd-6795b17cedc6",
+    #     matching_id=0, 
+    #     user_text="What is the weather like today?",
+    #     user_text_idx=0,  # Assuming the first message is the user text
+    #     candidates=candidates
+    # )
+
+
+    ######
+    # call_transcript_path = Path(
+    #     "/www/files/call_transcripts/d37mNMstUaZwSPqtXUIJ/ef7501dd-e530-4e70-82bd-6795b17cedc6.json"
+    # )
+    # all_messages = json.loads(call_transcript_path.read_text(encoding="utf-8"))
+    # messages_with_up_matching, messages_with_up_matching_idx = filter_messages_with_up_matching(
+    #     all_messages
+    # )
+    # depth2_conv_paths_by_ids_dict = get_depth2_conv_paths_by_ids_dict(messages_with_up_matching)
+    # conv_paths_from_source_nodes = get_conv_paths_from_source_nodes_dict(
+    #     list(depth2_conv_paths_by_ids_dict.values())
+    # )
+    # process_call_transcript(
+    #     call_transcript_path,
+    #     output_dir=Path(
+    #         "/www/files/matching_dataset/en/d37mNMstUaZwSPqtXUIJ/ef7501dd-e530-4e70-82bd-6795b17cedc6"
+    #     ),
+    #     language="en",
+    #     assistant_id="d37mNMstUaZwSPqtXUIJ",
+    #     call_id="ef7501dd-e530-4e70-82bd-6795b17cedc6",
+    # )
+    # print(conv_paths_from_source_nodes)
