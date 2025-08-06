@@ -13,20 +13,17 @@ import time
 
 
 import vocal.common.static  # noqa: F401
-from getvocal.datamodel.sql.user_prompts import UserPrompts
-from getvocal.datamodel.sql.assistant_questions import AssistantQuestions
-from getvocal.datamodel.sql.assistant_answers import AssistantAnswers
 
 
 from utils import (
-    filter_message_list,
+    filter_messages_with_up_matching,
     get_assistant_language,
     check_normalized_text_matching,
     CALL_TRANSCRIPTS_DIR,
-    get_conv_paths_by_ids,
-    get_conv_paths_by_source_node,
-    Message,
+    get_depth2_conv_paths_by_ids_dict,
+    get_conv_paths_from_source_nodes_dict,
     save_matching_to_json,
+    extract_matching_candidates_from_source_node,
 )
 # get_default_embedding_model,
 # cosine_distance,
@@ -98,66 +95,51 @@ def process_call_transcript(
 ) -> None:
     # logging.info(f"Processing call transcript: {call_transcript_path}")
 
-    message_list = json.loads(call_transcript_path.read_text(encoding="utf-8"))
-    valid_messages = filter_message_list(message_list)
-    cp_id_to_cp = get_conv_paths_by_ids(valid_messages)
-    source_node_to_cp = get_conv_paths_by_source_node(list(cp_id_to_cp.values()))
+    all_messages = json.loads(call_transcript_path.read_text(encoding="utf-8"))
+    messages_with_up_matching, messages_with_up_matching_idx = filter_messages_with_up_matching(
+        all_messages
+    )
+    depth2_conv_paths_by_ids_dict = get_depth2_conv_paths_by_ids_dict(messages_with_up_matching)
+    conv_paths_from_source_nodes_dict = get_conv_paths_from_source_nodes_dict(
+        list(depth2_conv_paths_by_ids_dict.values())
+    )
 
     conversation = []
     seen_conv_path_ids = set()
     user_text_idx = -1
     matching_id = 0
 
-    for idx, message in enumerate(valid_messages):
-        conversation.append({"role": message.role, "text": message.text})
-        # Get user_text query
-        if message.role == "USER":
-            user_text = message.text  # live transcription
-            if message.matching:
-                user_text = message.matching.original  # offline transcription
-                user_text_idx = idx
-            continue
+    for idx, message in enumerate(all_messages):
+        conversation.append({"role": message["role"], "text": message["text"]})
 
-        # Make sure that message contains an unseen depth 2 matching 
+        # Make sure that
+        conv_path_id = messages_with_up_matching[matching_id].matching.conv_path_id
         if (
-            message.matching.conv_path_id not in cp_id_to_cp
-            or message.matching.conv_path_id in seen_conv_path_ids
+            idx != messages_with_up_matching_idx[matching_id]     # the current message contains matching
+            or conv_path_id not in depth2_conv_paths_by_ids_dict  # the matching is depth 2
+            or conv_path_id in seen_conv_path_ids                 # the conv_path was not processed yet
         ):
             continue
 
-        conv_path_id = message.matching.conv_path_id
-        seen_conv_path_ids.add(conv_path_id)
-        conv_path = cp_id_to_cp.get(conv_path_id)
-        if not conv_path:
-            continue
+        # Get user_text from the message before the matching message
+        user_text_idx = idx - 1
+        user_text = all_messages[user_text_idx].text  # live transcription
+        try:
+            user_text = all_messages[user_text_idx].matching.original  # offline transcription
+        except AttributeError:
+            pass
 
         # Skip exact matching
+        conv_path = depth2_conv_paths_by_ids_dict.get(conv_path_id)
         if message.matching.distance == 0.0 and check_normalized_text_matching(
             user_text, conv_path.user_prompt_id
         ):
             continue
 
-        # Extract conv_paths from source_node as matching candidates
-        conv_path_candidates = source_node_to_cp[conv_path.source_node_id]
-        candidates = {"up": [], "aa": [], "aq": [], "conv_path_id": []}
-
-        all_up_ids = [], all_aa_ids = [], all_aq_ids = []
-        for conv_path in conv_path_candidates:
-            all_up_ids.append(conv_path.user_prompt_id)
-            all_aa_ids.append(conv_path.assistant_answer_id)
-            all_aq_ids.append(conv_path.target_node_id)
-            candidates["conv_path_id"].append(conv_path.id)
-
-        ### TODO: search how to limit return columns in SQLModel. For example only get 'text' column
-        all_ups = UserPrompts.get_by_ids(all_up_ids)
-        all_aas = AssistantAnswers.get_by_ids(all_aa_ids)
-        all_aqs = AssistantQuestions.get_by_ids(all_aq_ids)
-
-        candidates["up"] = [up.text for up in all_ups]
-        candidates["aa"] = [aa.text for aa in all_aas]
-        candidates["aq"] = [
-            aq.text if aq else None for aq in all_aqs
-        ]  # follow up question is optional
+        # Extract possible conv_paths from source_node as matching candidates
+        candidates = extract_matching_candidates_from_source_node(
+            conv_path.source_node_id, conv_paths_from_source_nodes_dict
+        )
 
         # Save matching into .json file
         save_matching_to_json(
@@ -171,14 +153,15 @@ def process_call_transcript(
             candidates,
         )
 
+        seen_conv_path_ids.add(conv_path_id)
         matching_id += 1
 
-    # Save conversation into .json file
+    # Save conversation into .json file only if there is at least one matching
     if matching_id > 0:
         Path(f"{output_dir}/transcript.json").write_text(json.dumps(conversation), encoding="utf-8")
 
     logging.info(
-        f"Processed call transcript: {assistant_id} | {call_id} with {len(cp_id_to_cp)} matchings."
+        f"Processed call transcript: {assistant_id} | {call_id} with {len(depth2_conv_paths_by_ids_dict)} matchings."
     )
 
 
@@ -244,8 +227,21 @@ if __name__ == "__main__":
     call_transcript_path = Path(
         "/www/files/call_transcripts/d37mNMstUaZwSPqtXUIJ/ef7501dd-e530-4e70-82bd-6795b17cedc6.json"
     )
-    message_list = json.loads(call_transcript_path.read_text(encoding="utf-8"))
-    valid_messages = filter_message_list(message_list)
-    cp_id_to_cp = get_conv_paths_by_ids(valid_messages)
-    source_node_to_cp = get_conv_paths_by_source_node(list(cp_id_to_cp.values()))
+    all_messages = json.loads(call_transcript_path.read_text(encoding="utf-8"))
+    messages_with_up_matching, messages_with_up_matching_idx = filter_messages_with_up_matching(
+        all_messages
+    )
+    depth2_conv_paths_by_ids_dict = get_depth2_conv_paths_by_ids_dict(messages_with_up_matching)
+    conv_paths_from_source_nodes = get_conv_paths_from_source_nodes_dict(
+        list(depth2_conv_paths_by_ids_dict.values())
+    )
+    process_call_transcript(
+        call_transcript_path,
+        output_dir=Path(
+            "/www/files/matching_dataset/en/d37mNMstUaZwSPqtXUIJ/ef7501dd-e530-4e70-82bd-6795b17cedc6"
+        ),
+        language="en",
+        assistant_id="d37mNMstUaZwSPqtXUIJ",
+        call_id="ef7501dd-e530-4e70-82bd-6795b17cedc6",
+    )
     print(source_node_to_cp)
