@@ -1,5 +1,6 @@
 from pathlib import Path
 import json
+import shutil
 import sys
 sys.path.insert(0, "/www/Embedding")
 from src.generate_matching_inputs.extract_up_matchings import process_call_transcript
@@ -34,7 +35,8 @@ def test_process_call_transcript():
         source_node_id = conv_path_id.split("_")[0]
         assert source_node_id == expected_source_node_id, f"Mismatch in conv_path_id: expected {expected_source_node_id}, got {source_node_id}"
 
-
+    # delete the output_dir after test
+    shutil.rmtree("/www/files/test")
 
 
 

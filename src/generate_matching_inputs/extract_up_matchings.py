@@ -16,6 +16,8 @@ import logging
 from pathlib import Path
 import concurrent.futures
 import time
+import sys
+sys.path.insert(0, "/www/Embedding")
 from src.generate_matching_inputs.utils import (
     filter_messages_with_up_matching,
     get_depth2_conv_paths_by_ids_dict,
@@ -174,13 +176,6 @@ def extract_up_matchings_from_call_transcripts(
 
 
 if __name__ == "__main__":
-    # start = time.time()
-    # extract_up_matchings_from_call_transcripts(save_to_dir="/www/files/")
-    # logging.info(f"Done extracting matchings from call transcripts. Took {time.time() - start:.2f} seconds.")
-
-    call_transcript_path = Path("/www/files/call_transcripts/nRvPgRrKr2MuO7bjYCRY/255edbe5-cd84-4969-89a0-269a31437e75.json")
-    output_dir = Path("/www/files/testttttt")
-    language  = "en"
-    assistant_id = "nRvPgRrKr2MuO7bjYCRY"
-    call_id = "255edbe5-cd84-4969-89a0-269a31437e75"
-    process_call_transcript(call_transcript_path, output_dir, language, assistant_id, call_id)
+    start = time.time()
+    extract_up_matchings_from_call_transcripts(save_to_dir="/www/files/")
+    logging.info(f"Done extracting matchings from call transcripts. Took {time.time() - start:.2f} seconds.")
