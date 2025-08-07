@@ -88,9 +88,7 @@ def get_user_prompt_id_from_source_node(source_node_id: str) -> list[str]:
     return user_prompt_ids
 
 
-def get_assistant_language(assistant_id: str) -> str:
-    assistant = Assistants.get_by_ids([assistant_id])
-    return assistant[0].language
+
 
 
 def get_default_embedding_model(language: str) -> str:

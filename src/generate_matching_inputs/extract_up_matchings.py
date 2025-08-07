@@ -16,27 +16,7 @@ import logging
 from pathlib import Path
 import concurrent.futures
 import time
-
-from utils import (
-    filter_messages_with_up_matching,
-    get_assistant_language,
-    check_normalized_text_matching,
-    CALL_TRANSCRIPTS_DIR,
-    get_depth2_conv_paths_by_ids_dict,
-    get_conv_paths_from_source_nodes_dict,
-    save_matching_to_json,
-    extract_matching_candidates_from_source_node,
-    Message,
-)
-
-
-# Configure logging to show DEBUG level messages
-logging.basicConfig(
-    level=logging.DEBUG,
-    format="%(asctime)s - %(levelname)s - %(message)s",
-    datefmt="%Y-%m-%d %H:%M:%S",
-    force=True,
-)
+from utils import *
 
 
 def process_call_transcript(
@@ -105,7 +85,9 @@ def process_call_transcript(
 
         # Remove matchings with §NO_NEED§ in user prompt candidates
         if not candidates:
-            logging.debug("Remove matching with §NO_NEED§ in user prompt candidates")
+            logging.debug(
+                f"Remove matching with §NO_NEED§ user prompt candidate in {call_transcript_path}"
+            )
             continue
 
         save_matching_to_json(
@@ -154,7 +136,7 @@ def extract_up_matchings_from_call_transcripts(
                 f"{save_to_dir}/matching_dataset/inputs/ut_to_conv_path/{language}/{assistant_id}/{call_id}"
             )
 
-            # Since the conversation.json is only created after processing all matchings in call transcript, 
+            # Since the conversation.json is only created after processing all matchings in call transcript,
             # we check if it exists to know whether the transcript has already been processed.
             # Note that a call transcript without conversation.json can also mean that it has no matchings.
             # We still reprocess it in this code (even if it was processed before).
@@ -180,8 +162,7 @@ def extract_up_matchings_from_call_transcripts(
                 logging.error(f"Error in process_call_transcript: {exc}")
 
 
-
 if __name__ == "__main__":
+    start = time.time()
     extract_up_matchings_from_call_transcripts(save_to_dir="/www/files/")
-
-   
+    logging.info(f"All matchings extracted in {time.time() - start:.2f} seconds.")

@@ -7,6 +7,7 @@ from pydantic import BaseModel
 
 import vocal.common.static  # noqa: F401
 from vocal.common.utils import normalize_text
+from getvocal.datamodel.sql import Assistants
 from getvocal.datamodel.sql.user_prompts import UserPrompts
 from getvocal.datamodel.sql.assistant_questions import AssistantQuestions
 from getvocal.datamodel.sql.assistant_answers import AssistantAnswers
@@ -19,6 +20,15 @@ LANGUAGES = {
     "es": "spanish",
     "fr": "french",
 }
+
+
+# Configure logging to show DEBUG level messages
+logging.basicConfig(
+    level=logging.DEBUG,
+    format="%(asctime)s - %(levelname)s - %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
+    force=True,
+)
 
 
 class ConvPath(BaseModel):
@@ -43,6 +53,11 @@ class Message(BaseModel):
     role: str
     text: str
     matching: Matching
+
+
+def get_assistant_language(assistant_id: str) -> str:
+    assistant = Assistants.get_by_ids([assistant_id])
+    return assistant[0].language
 
 
 def filter_messages_with_up_matching(message_list: list[dict]) -> tuple[list[Message], list[int]]:

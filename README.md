@@ -3,8 +3,8 @@
 ## Dataset Structure
 
 ```
-matching_dataset/
-├── inputs/
+├── matching_dataset/
+│   ├── inputs/
 │   ├── ut_to_conv_path/
 │   │   └── <language>/
 │   │       └── <assistant_id>/
