@@ -16,7 +16,17 @@ import logging
 from pathlib import Path
 import concurrent.futures
 import time
-from utils import *
+from src.generate_matching_inputs.utils import (
+    filter_messages_with_up_matching,
+    get_depth2_conv_paths_by_ids_dict,
+    get_conv_paths_from_source_nodes_dict,
+    Message,
+    check_normalized_text_matching,
+    extract_matching_candidates_from_source_node,
+    save_matching_to_json,
+    get_assistant_language,
+    CALL_TRANSCRIPTS_DIR,
+)
 
 
 def process_call_transcript(

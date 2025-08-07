@@ -223,6 +223,7 @@ def check_normalized_text_matching(ut_query: str, user_prompt_id: str) -> bool:
     """
     try:
         user_prompt = UserPrompts.get(user_prompt_id)
+        
         if user_prompt.primary_id:
             # If the user prompt is secondary, get its text
             ut_match = user_prompt.text
@@ -244,4 +245,9 @@ def check_normalized_text_matching(ut_query: str, user_prompt_id: str) -> bool:
         logging.debug(f"Error retrieving user prompt: {user_prompt_id}.")
         return False
 
- 
+
+
+if __name__ == "__main__":
+    ut_query = "Vale, pero hacerlo rápido."
+    user_prompt_id = "50e9d0390e2cbf580a1fb266532be978"
+    check_normalized_text_matching(ut_query, user_prompt_id)
