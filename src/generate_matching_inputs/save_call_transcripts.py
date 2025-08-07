@@ -1,13 +1,18 @@
+"""
+Save call transcripts for all assistants in production to JSON files.
+"""
+
 import json
 import logging
+import time
 from pathlib import Path
 import concurrent.futures
 import sqlmodel as sm
 from sqlalchemy import select
 
 import vocal.common.static  # noqa: E402,F401
-from getvocal.datamodel.sql.calls import Calls
 from getvocal.datamodel.sql.assistants import Assistants
+from getvocal.datamodel.sql.calls import Calls
 
 from utils import CALL_TRANSCRIPTS_DIR
 
@@ -81,5 +86,7 @@ def save_call_transcripts_to_json(
 
 
 if __name__ == "__main__":
+    start = time.time()
     save_call_transcripts_to_json(2, CALL_TRANSCRIPTS_DIR)
-    logging.info(f"Successfully saved call transcripts to directory: {CALL_TRANSCRIPTS_DIR}")
+    logging.info(f"Done saving call transcripts to {CALL_TRANSCRIPTS_DIR}. Took {time.time() - start:.2f} seconds.")
+

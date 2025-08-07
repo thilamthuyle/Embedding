@@ -118,3 +118,33 @@ print(conv_paths_from_source_nodes)
     #     call_id="ef7501dd-e530-4e70-82bd-6795b17cedc6",
     # )
     # print(conv_paths_from_source_nodes)
+
+
+
+####
+# call_transcript with repetitive conv_path_id (with conversation go back into a previously visited node)
+assistant_id = 'nRvPgRrKr2MuO7bjYCRY'
+call_id = '255edbe5-cd84-4969-89a0-269a31437e75'
+
+conv_path_id_idx = [4, 5, 7, 8, 10, 11, 12]
+conv_path_ids = [
+ '73077eff3efe60a2e3cb899b74f33b94_3404de73309c5df091f22ed6ac9fbe58_b11e96af3ced0c747c8974b45929d3fb_bed9928d9263f86767cbb3d8ab1f2e06',
+ '73077eff3efe60a2e3cb899b74f33b94_3404de73309c5df091f22ed6ac9fbe58_b11e96af3ced0c747c8974b45929d3fb_bed9928d9263f86767cbb3d8ab1f2e06',
+ 'bed9928d9263f86767cbb3d8ab1f2e06_e416d7315594a080bbd5397a163dc8ed_7d1fdf38aea980d8fdd72c3506d5cdc9_0f78760474867898531dda8b38b11faf',
+ 'bed9928d9263f86767cbb3d8ab1f2e06_e416d7315594a080bbd5397a163dc8ed_7d1fdf38aea980d8fdd72c3506d5cdc9_0f78760474867898531dda8b38b11faf',
+ '0f78760474867898531dda8b38b11faf_d74f719e2eb67295dbda5858d6866aa4_300381de2cbb37f866ddc4f888e4861f_08b92e58-31a8-45ea-9e49-55a85ec175d4',
+ '08b92e58-31a8-45ea-9e49-55a85ec175d4_a80948c904be4f37ebc4bb42c58e624d_33014647bdedb1a7d2d5c4812fe6d1c2_b0bd478e6cd83fe97b08353d1de39a37',
+ '0f78760474867898531dda8b38b11faf_d74f719e2eb67295dbda5858d6866aa4_300381de2cbb37f866ddc4f888e4861f_08b92e58-31a8-45ea-9e49-55a85ec175d4'
+]
+
+user_text_ids = [3, 6, 9, 10]
+user_texts = [
+    'Hola, buenos días, pues verás, tengo un problema.',
+    'Soy un particular.',
+    'Sí, puedes utilizarlo.',
+
+]
+
+Observations:
+- 2 consecutive conv_path_ids with different source_nodes. Check that!!!!
+
