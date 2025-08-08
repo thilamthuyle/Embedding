@@ -191,30 +191,6 @@ def extract_matching_candidates_from_source_node(
     return candidates
 
 
-def save_matching_to_json(
-    output_dir: Path,
-    language: str,
-    assistant_id: str,
-    call_id: str,
-    matching_id: int,
-    user_text: str,
-    user_text_idx: int,
-    candidates: dict[str, list[str]],
-):
-    matching = {
-        "assistant_id": assistant_id,
-        "call_id": call_id,
-        "language": language,
-        "user_text": user_text,
-        "user_text_idx": user_text_idx,
-        "candidates": candidates,
-    }
-    output_dir.mkdir(parents=True, exist_ok=True)
-    file_path = Path(f"{output_dir}/{matching_id}.json")
-    file_path.write_text(json.dumps(matching), encoding="utf-8")
-    logging.debug(f"Saved matching to {file_path}")
-
-
 def check_normalized_text_matching(ut_query: str, user_prompt_id: str) -> bool:
     """
     Check exact matching between user text and user prompt ID.
@@ -223,7 +199,7 @@ def check_normalized_text_matching(ut_query: str, user_prompt_id: str) -> bool:
     """
     try:
         user_prompt = UserPrompts.get(user_prompt_id)
-        
+
         if user_prompt.primary_id:
             # If the user prompt is secondary, get its text
             ut_match = user_prompt.text
@@ -246,8 +222,66 @@ def check_normalized_text_matching(ut_query: str, user_prompt_id: str) -> bool:
         return False
 
 
+def save_ut_to_conv_path_matching(
+    save_to_dir: Path,
+    language: str,
+    assistant_id: str,
+    call_id: str,
+    matching_id: int,
+    user_text: str,
+    user_text_idx: int,
+    candidates: dict[str, list[str]],
+):
+    matching = {
+        "assistant_id": assistant_id,
+        "call_id": call_id,
+        "language": language,
+        "user_text": user_text,
+        "user_text_idx": user_text_idx,
+        "candidates": candidates,
+    }
+    save_to_dir.mkdir(parents=True, exist_ok=True)
+    file_path = Path(f"{save_to_dir}/{matching_id}.json")
+    file_path.write_text(json.dumps(matching), encoding="utf-8")
+    logging.debug(f"Saved matching to {file_path}")
 
-if __name__ == "__main__":
-    ut_query = "Vale, pero hacerlo rápido."
-    user_prompt_id = "50e9d0390e2cbf580a1fb266532be978"
-    check_normalized_text_matching(ut_query, user_prompt_id)
+
+def save_up_to_examples_matching(save_to_dir: Path, candidates: dict[str, list[str]]):
+    """
+    Save new user prompt to examples matching from candidates into JSON files.
+    """
+    for conv_path_id in candidates["conv_path_id"]:
+        # Check if a conv_path_id already exists, skip processing
+        if Path(f"{save_to_dir}/{conv_path_id}.json").exists():
+            logging.debug(f"File {save_to_dir}/{conv_path_id}.json already exists, skipping...")
+            continue
+
+        user_prompt_id = conv_path_id.split("_")[1]  # Assuming conv_path_id is depth 2 conv_path, whose format is source_up_aa_aq        
+        user_prompt = UserPrompts.get(user_prompt_id)
+        if user_prompt.primary_id:
+            # If the user prompt is secondary, get its text
+            matching = {
+                "conv_path_id": conv_path_id,
+                "primary_user_prompt": None,
+                "attached_user_prompts": [user_prompt.text]
+            }
+        else:
+            # If the user prompt is primary, check for attached (secondary) user prompts and get their texts
+            attached_up_ids = user_prompt.attached_user_prompt_ids
+            attached_ups = UserPrompts.query(sm.select(UserPrompts.text).where(UserPrompts.id.in_(attached_up_ids)))
+            attached_user_prompts = [up["text"] for up in attached_ups]
+            matching = {
+                "conv_path_id": conv_path_id,
+                "primary_user_prompt": user_prompt.text,
+                "attached_user_prompts": attached_user_prompts
+            }
+        save_to_dir.mkdir(parents=True, exist_ok=True)
+        file_path = Path(f"{save_to_dir}/{conv_path_id}.json")
+        file_path.write_text(json.dumps(matching, indent=2), encoding="utf-8")
+        logging.debug(f"Saved up_to_examples matching to {file_path}")
+
+
+# if __name__ == "__main__":
+#     ut_query = "Vale, pero hacerlo rápido."
+#     user_prompt_id = "50e9d0390e2cbf580a1fb266532be978"
+#     check_normalized_text_matching(ut_query, user_prompt_id)

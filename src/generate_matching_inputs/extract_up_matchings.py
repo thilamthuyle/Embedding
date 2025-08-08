@@ -17,6 +17,7 @@ from pathlib import Path
 import concurrent.futures
 import time
 import sys
+
 sys.path.insert(0, "/www/Embedding")
 from src.generate_matching_inputs.utils import (
     filter_messages_with_up_matching,
@@ -25,7 +26,8 @@ from src.generate_matching_inputs.utils import (
     Message,
     check_normalized_text_matching,
     extract_matching_candidates_from_source_node,
-    save_matching_to_json,
+    save_ut_to_conv_path_matching,
+    save_up_to_examples_matching,
     get_assistant_language,
     CALL_TRANSCRIPTS_DIR,
 )
@@ -33,7 +35,7 @@ from src.generate_matching_inputs.utils import (
 
 def process_call_transcript(
     call_transcript_path: Path,
-    output_dir: Path,
+    inputs_dir: Path,
     language: str,
     assistant_id: str,
     call_id: str,
@@ -103,8 +105,8 @@ def process_call_transcript(
             )
             continue
 
-        save_matching_to_json(
-            output_dir,
+        save_ut_to_conv_path_matching(
+            Path(f"{inputs_dir}/ut_to_conv_path/{language}/{assistant_id}/{call_id}"),
             language,
             assistant_id,
             call_id,
@@ -114,14 +116,16 @@ def process_call_transcript(
             candidates,
         )
 
+        save_up_to_examples_matching(Path(f"{inputs_dir}/up_to_examples"), candidates)
+
         seen_conv_path_ids.add(conv_path_id)
         matching_id += 1
 
     # Save conversation only if there is at least one matching
     if matching_id > 0:
-        Path(f"{output_dir}/conversation.json").write_text(
-            json.dumps(conversation), encoding="utf-8"
-        )
+        Path(
+            f"{inputs_dir}/ut_to_conv_path/{language}/{assistant_id}/{call_id}/conversation.json"
+        ).write_text(json.dumps(conversation), encoding="utf-8")
 
     logging.info(
         f"Processed call transcript: {assistant_id} / {call_id} with {matching_id} matchings."
@@ -145,22 +149,22 @@ def extract_up_matchings_from_call_transcripts(
 
         for call_transcript_path in assistant_dir.iterdir():
             call_id = Path(call_transcript_path.name).stem
-            output_dir = Path(
-                f"{save_to_dir}/matching_dataset/inputs/ut_to_conv_path/{language}/{assistant_id}/{call_id}"
-            )
+            inputs_dir = Path(f"{save_to_dir}/matching_dataset/inputs")
 
             # Since the conversation.json is only created after processing all matchings in call transcript,
             # we check if it exists to know whether the transcript has already been processed.
             # Note that a call transcript without conversation.json can also mean that it has no matchings.
             # We still reprocess it in this code (even if it was processed before).
-            if Path(f"{output_dir}/conversation.json").exists():
+            if Path(
+                f"{inputs_dir}/ut_to_conv_path/{language}/{assistant_id}/{call_id}/conversation.json"
+            ).exists():
                 logging.debug(
                     f"File {call_transcript_path} has already been processed, skipping..."
                 )
                 continue
 
             arguments_list.append(
-                (call_transcript_path, output_dir, language, assistant_id, call_id)
+                (call_transcript_path, inputs_dir, language, assistant_id, call_id)
             )
     logging.info(
         f"Total call transcripts to process: {len(arguments_list)}. Arguments list prepared in {time.time() - start:.2f} seconds."
@@ -178,4 +182,6 @@ def extract_up_matchings_from_call_transcripts(
 if __name__ == "__main__":
     start = time.time()
     extract_up_matchings_from_call_transcripts(save_to_dir="/www/files/")
-    logging.info(f"Done extracting matchings from call transcripts. Took {time.time() - start:.2f} seconds.")
+    logging.info(
+        f"Done extracting matchings from call transcripts. Took {time.time() - start:.2f} seconds."
+    )

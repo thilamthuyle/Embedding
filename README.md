@@ -3,13 +3,13 @@
 ## Dataset Structure
 
 ```
-├── matching_dataset/
-│   ├── inputs/
+matching_dataset/
+├── inputs/
 │   ├── ut_to_conv_path/
 │   │   └── <language>/
 │   │       └── <assistant_id>/
 │   │           └── <call_id>/
-│   │               ├── conversation.json  # list of messages 
+│   │               ├── conversation.json  # message list
 │   │               ├── 0.json
 │   │               ├── 1.json
 │   │               └── ...
@@ -43,9 +43,9 @@
       "assistant_id": "string",
       "call_id": "string",
       "user_text": "string",
-      "user_text_idx": "int", # index of the user_text message in the conversation (in transcript.json)
+      "user_text_idx": "int", # index of the user_text message in the conversation (in conversation.json)
       "candidates": {
-        "up": ["string"],
+        "up": ["string"], # this can be either primary or attached user_prompt
         "aa": ["string"],
         "aq": ["string"],
         "conv_path_id": ["string"]
