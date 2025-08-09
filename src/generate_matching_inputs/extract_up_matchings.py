@@ -27,15 +27,15 @@ from src.generate_matching_inputs.utils import (
     check_normalized_text_matching,
     extract_matching_candidates_from_source_node,
     save_ut_to_conv_path_matching,
-    save_up_to_examples_matching,
     get_assistant_language,
     CALL_TRANSCRIPTS_DIR,
+    process_matching_json_file,
 )
 
 
 def process_call_transcript(
     call_transcript_path: Path,
-    inputs_dir: Path,
+    ut_to_conv_path_dir: Path,
     language: str,
     assistant_id: str,
     call_id: str,
@@ -106,7 +106,7 @@ def process_call_transcript(
             continue
 
         save_ut_to_conv_path_matching(
-            Path(f"{inputs_dir}/ut_to_conv_path/{language}/{assistant_id}/{call_id}"),
+            Path(f"{ut_to_conv_path_dir}/{language}/{assistant_id}/{call_id}"),
             language,
             assistant_id,
             call_id,
@@ -116,15 +116,13 @@ def process_call_transcript(
             candidates,
         )
 
-        save_up_to_examples_matching(Path(f"{inputs_dir}/up_to_examples"), candidates)
-
         seen_conv_path_ids.add(conv_path_id)
         matching_id += 1
 
     # Save conversation only if there is at least one matching
     if matching_id > 0:
         Path(
-            f"{inputs_dir}/ut_to_conv_path/{language}/{assistant_id}/{call_id}/conversation.json"
+            f"{ut_to_conv_path_dir}/{language}/{assistant_id}/{call_id}/conversation.json"
         ).write_text(json.dumps(conversation), encoding="utf-8")
 
     logging.info(
@@ -132,8 +130,8 @@ def process_call_transcript(
     )
 
 
-def extract_up_matchings_from_call_transcripts(
-    save_to_dir: str, call_transcripts_dir: str = CALL_TRANSCRIPTS_DIR
+def generate_ut_to_conv_path(
+    ut_to_conv_path_dir: str, call_transcripts_dir: str = CALL_TRANSCRIPTS_DIR
 ):
     """
     Walk through all call transcripts and extract user prompt matchings using multiprocessing.
@@ -149,14 +147,13 @@ def extract_up_matchings_from_call_transcripts(
 
         for call_transcript_path in assistant_dir.iterdir():
             call_id = Path(call_transcript_path.name).stem
-            inputs_dir = Path(f"{save_to_dir}/matching_dataset/inputs")
 
             # Since the conversation.json is only created after processing all matchings in call transcript,
             # we check if it exists to know whether the transcript has already been processed.
             # Note that a call transcript without conversation.json can also mean that it has no matchings.
             # We still reprocess it in this code (even if it was processed before).
             if Path(
-                f"{inputs_dir}/ut_to_conv_path/{language}/{assistant_id}/{call_id}/conversation.json"
+                f"{ut_to_conv_path_dir}/{language}/{assistant_id}/{call_id}/conversation.json"
             ).exists():
                 logging.debug(
                     f"File {call_transcript_path} has already been processed, skipping..."
@@ -164,7 +161,7 @@ def extract_up_matchings_from_call_transcripts(
                 continue
 
             arguments_list.append(
-                (call_transcript_path, inputs_dir, language, assistant_id, call_id)
+                (call_transcript_path, ut_to_conv_path_dir, language, assistant_id, call_id)
             )
     logging.info(
         f"Total call transcripts to process: {len(arguments_list)}. Arguments list prepared in {time.time() - start:.2f} seconds."
@@ -177,11 +174,38 @@ def extract_up_matchings_from_call_transcripts(
                 future.result()
             except Exception as exc:
                 logging.error(f"Error in process_call_transcript: {exc}")
-
-
-if __name__ == "__main__":
-    start = time.time()
-    extract_up_matchings_from_call_transcripts(save_to_dir="/www/files/")
+    
     logging.info(
         f"Done extracting matchings from call transcripts. Took {time.time() - start:.2f} seconds."
     )
+
+
+def generate_up_to_examples(up_to_examples_dir: str, ut_to_conv_path_dir: str):
+    start = time.time()
+    logging.info("Preparing arguments list for generating up_to_examples...")
+    arguments_list = []
+    matching_json_files = [
+        file for file in Path(ut_to_conv_path_dir).rglob("*.json") 
+        if file.name != "conversation.json"
+    ]
+    for file in matching_json_files:
+        candidates = json.loads(file.read_text(encoding="utf-8"))["candidates"]
+        arguments_list.append((up_to_examples_dir, candidates))
+    
+    with concurrent.futures.ProcessPoolExecutor(max_workers=4) as executor:
+        futures = [executor.submit(process_matching_json_file, *args) for args in arguments_list]
+        for future in concurrent.futures.as_completed(futures):
+            try:
+                future.result()
+            except Exception as exc:
+                logging.error(f"Error in process_matching_json_file: {exc}")
+    logging.info(f"Done processing {len(matching_json_files)} matching JSON files in {time.time() - start:.2f} seconds.")
+
+if __name__ == "__main__":
+    generate_ut_to_conv_path(ut_to_conv_path_dir="/www/files/matching_dataset/inputs/ut_to_conv_path")
+
+
+    generate_up_to_examples(up_to_examples_dir="/www/files/matching_dataset/inputs/up_to_examples",
+                             ut_to_conv_path_dir="/www/files/matching_dataset/inputs/ut_to_conv_path")
+
+

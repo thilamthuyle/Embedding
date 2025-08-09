@@ -242,22 +242,32 @@ def save_ut_to_conv_path_matching(
     }
     save_to_dir.mkdir(parents=True, exist_ok=True)
     file_path = Path(f"{save_to_dir}/{matching_id}.json")
-    file_path.write_text(json.dumps(matching), encoding="utf-8")
+    file_path.write_text(json.dumps(matching, ensure_ascii=False), encoding="utf-8")
     logging.debug(f"Saved matching to {file_path}")
 
 
-def save_up_to_examples_matching(save_to_dir: Path, candidates: dict[str, list[str]]):
+
+
+def process_matching_json_file(up_to_examples_dir: Path, candidates: dict[str, list[str]]):
     """
     Save new user prompt to examples matching from candidates into JSON files.
     """
+    all_conv_path_ids = []
+    all_user_prompt_ids = set()
     for conv_path_id in candidates["conv_path_id"]:
         # Check if a conv_path_id already exists, skip processing
-        if Path(f"{save_to_dir}/{conv_path_id}.json").exists():
-            logging.debug(f"File {save_to_dir}/{conv_path_id}.json already exists, skipping...")
+        if Path(f"{up_to_examples_dir}/{conv_path_id}.json").exists():
+            logging.debug(f"File {up_to_examples_dir}/{conv_path_id}.json already exists, skipping...")
             continue
+        all_conv_path_ids.append(conv_path_id)
+        all_user_prompt_ids.add(conv_path_id.split("_")[1])  # Assuming conv_path_id is depth 2 conv_path, whose format is source_up_aa_aq
+    user_prompts = UserPrompts.query(sm.select(UserPrompts).where(UserPrompts.id.in_(all_user_prompt_ids)))
+    # user_prompts = UserPrompts.get_by_ids(all_user_prompt_ids)
+    user_prompts_dict = {up.id: up for up in user_prompts}
 
-        user_prompt_id = conv_path_id.split("_")[1]  # Assuming conv_path_id is depth 2 conv_path, whose format is source_up_aa_aq        
-        user_prompt = UserPrompts.get(user_prompt_id)
+    for conv_path_id in all_conv_path_ids:
+        user_prompt_id = conv_path_id.split("_")[1]  
+        user_prompt = user_prompts_dict[user_prompt_id]
         if user_prompt.primary_id:
             # If the user prompt is secondary, get its text
             matching = {
@@ -275,13 +285,8 @@ def save_up_to_examples_matching(save_to_dir: Path, candidates: dict[str, list[s
                 "primary_user_prompt": user_prompt.text,
                 "attached_user_prompts": attached_user_prompts
             }
-        save_to_dir.mkdir(parents=True, exist_ok=True)
-        file_path = Path(f"{save_to_dir}/{conv_path_id}.json")
-        file_path.write_text(json.dumps(matching, indent=2), encoding="utf-8")
+        Path(up_to_examples_dir).mkdir(parents=True, exist_ok=True)
+        file_path = Path(f"{up_to_examples_dir}/{conv_path_id}.json")
+        file_path.write_text(json.dumps(matching, indent=2, ensure_ascii=False), encoding="utf-8") # ensure_ascii=False to preserve § instead of converting it to \u00a7
         logging.debug(f"Saved up_to_examples matching to {file_path}")
 
-
-# if __name__ == "__main__":
-#     ut_query = "Vale, pero hacerlo rápido."
-#     user_prompt_id = "50e9d0390e2cbf580a1fb266532be978"
-#     check_normalized_text_matching(ut_query, user_prompt_id)
