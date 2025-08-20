@@ -19,6 +19,7 @@ LANGUAGES = {
     "en": "english",
     "es": "spanish",
     "fr": "french",
+    "nl": "dutch",
 }
 
 
@@ -179,13 +180,13 @@ def extract_matching_candidates_from_source_node(
         if (
             up_ids[i] in existing_ups_dict.keys()
             and aa_ids[i] in existing_aas_dict.keys()
-            and (
-                not aq_ids[i] or aq_ids[i] in existing_aqs_dict.keys()
-            )  # follow up question is optional
         ):
             candidates["up"].append(existing_ups_dict[up_ids[i]])
             candidates["aa"].append(existing_aas_dict[aa_ids[i]])
-            candidates["aq"].append(existing_aqs_dict[aq_ids[i]] if aq_ids[i] else None)
+            if aq_ids[i] is not None and aq_ids[i] in existing_aqs_dict.keys():
+                candidates["aq"].append(existing_aqs_dict[aq_ids[i]])
+            else:
+                candidates["aq"].append(None) # follow up question is optional
             candidates["conv_path_id"].append(conv_paths_from_source_node[i].id)
 
     return candidates
