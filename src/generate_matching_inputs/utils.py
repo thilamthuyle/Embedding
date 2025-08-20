@@ -246,6 +246,101 @@ def save_ut_to_conv_path_matching(
     logging.debug(f"Saved matching to {file_path}")
 
 
+def process_call_transcript(
+    call_transcript_path: Path,
+    ut_to_conv_path_dir: Path,
+    language: str,
+    assistant_id: str,
+    call_id: str,
+) -> None:
+    """
+    Process a single call transcript to extract all user prompt matchings, then save them to JSON files.
+    """
+    logging.debug(f"Start processing call transcript: {assistant_id} / {call_id}")
+
+    all_messages = json.loads(call_transcript_path.read_text(encoding="utf-8"))
+    messages_with_up_matching, messages_with_up_matching_idx = filter_messages_with_up_matching(
+        all_messages
+    )
+    depth2_conv_paths_by_ids_dict = get_depth2_conv_paths_by_ids_dict(messages_with_up_matching)
+    depth2_conv_path_ids = depth2_conv_paths_by_ids_dict.keys()
+    conv_paths_from_source_nodes_dict = get_conv_paths_from_source_nodes_dict(
+        list(depth2_conv_paths_by_ids_dict.values())
+    )
+
+    conversation = []
+    seen_conv_path_ids = set()
+    user_text_idx = -1
+
+    matching_id = 0
+
+    for idx, message in enumerate(all_messages):
+        conversation.append({"role": message["role"], "text": message["text"]})
+        if message["role"] == "USER":
+            user_text_idx = idx
+
+        # Make sure that
+        try:
+            message = Message(**message)
+            conv_path_id = message.matching.conv_path_id
+            if (
+                idx not in messages_with_up_matching_idx  # the current message contains matching
+                or conv_path_id not in depth2_conv_path_ids  # matching is depth 2
+                or conv_path_id in seen_conv_path_ids  # and conv_path_id was not processed yet
+            ):
+                continue
+        except Exception:
+            continue
+
+        # Get user_text from the last USER message before the current ASSISTANT message with matching
+        user_text = all_messages[user_text_idx]["text"]  # live transcription
+        try:
+            user_text = all_messages[user_text_idx]["matching"]["original"]  # offline transcription
+        except KeyError:
+            pass
+
+        # Skip exact matching
+        conv_path = depth2_conv_paths_by_ids_dict.get(conv_path_id)
+        if message.matching.distance == 0.0 and check_normalized_text_matching(
+            user_text, conv_path.user_prompt_id
+        ):
+            continue
+
+        # Extract possible conv_paths from source_node as matching candidates
+        candidates = extract_matching_candidates_from_source_node(
+            conv_path.source_node_id, conv_paths_from_source_nodes_dict
+        )
+
+        # Remove matchings with §NO_NEED§ in user prompt candidates
+        if not candidates:
+            logging.debug(
+                f"Remove matching with §NO_NEED§ user prompt candidate in {call_transcript_path}"
+            )
+            continue
+
+        save_ut_to_conv_path_matching(
+            Path(f"{ut_to_conv_path_dir}/{language}/{assistant_id}/{call_id}"),
+            language,
+            assistant_id,
+            call_id,
+            matching_id,
+            user_text,
+            user_text_idx,
+            candidates,
+        )
+
+        seen_conv_path_ids.add(conv_path_id)
+        matching_id += 1
+
+    # Save conversation only if there is at least one matching
+    if matching_id > 0:
+        Path(
+            f"{ut_to_conv_path_dir}/{language}/{assistant_id}/{call_id}/conversation.json"
+        ).write_text(json.dumps(conversation), encoding="utf-8")
+
+    logging.info(
+        f"Processed call transcript: {assistant_id} / {call_id} with {matching_id} matchings."
+    )
 
 
 def process_matching_json_file(up_to_examples_dir: Path, candidates: dict[str, list[str]]):
