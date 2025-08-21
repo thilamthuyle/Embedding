@@ -177,16 +177,13 @@ def extract_matching_candidates_from_source_node(
         return None
 
     for i in range(num_conv_paths):
-        if (
-            up_ids[i] in existing_ups_dict.keys()
-            and aa_ids[i] in existing_aas_dict.keys()
-        ):
+        if up_ids[i] in existing_ups_dict.keys() and aa_ids[i] in existing_aas_dict.keys():
             candidates["up"].append(existing_ups_dict[up_ids[i]])
             candidates["aa"].append(existing_aas_dict[aa_ids[i]])
             if aq_ids[i] is not None and aq_ids[i] in existing_aqs_dict.keys():
                 candidates["aq"].append(existing_aqs_dict[aq_ids[i]])
             else:
-                candidates["aq"].append(None) # follow up question is optional
+                candidates["aq"].append(None)  # follow up question is optional
             candidates["conv_path_id"].append(conv_paths_from_source_node[i].id)
 
     return candidates
@@ -353,36 +350,45 @@ def process_matching_json_file(up_to_examples_dir: Path, candidates: dict[str, l
     for conv_path_id in candidates["conv_path_id"]:
         # Check if a conv_path_id already exists, skip processing
         if Path(f"{up_to_examples_dir}/{conv_path_id}.json").exists():
-            logging.debug(f"File {up_to_examples_dir}/{conv_path_id}.json already exists, skipping...")
+            logging.debug(
+                f"File {up_to_examples_dir}/{conv_path_id}.json already exists, skipping..."
+            )
             continue
         all_conv_path_ids.append(conv_path_id)
-        all_user_prompt_ids.add(conv_path_id.split("_")[1])  # Assuming conv_path_id is depth 2 conv_path, whose format is source_up_aa_aq
-    user_prompts = UserPrompts.query(sm.select(UserPrompts).where(UserPrompts.id.in_(all_user_prompt_ids)))
+        all_user_prompt_ids.add(
+            conv_path_id.split("_")[1]
+        )  # Assuming conv_path_id is depth 2 conv_path, whose format is source_up_aa_aq
+    user_prompts = UserPrompts.query(
+        sm.select(UserPrompts).where(UserPrompts.id.in_(all_user_prompt_ids))
+    )
     # user_prompts = UserPrompts.get_by_ids(all_user_prompt_ids)
     user_prompts_dict = {up.id: up for up in user_prompts}
 
     for conv_path_id in all_conv_path_ids:
-        user_prompt_id = conv_path_id.split("_")[1]  
+        user_prompt_id = conv_path_id.split("_")[1]
         user_prompt = user_prompts_dict[user_prompt_id]
         if user_prompt.primary_id:
             # If the user prompt is secondary, get its text
             matching = {
                 "conv_path_id": conv_path_id,
                 "primary_user_prompt": None,
-                "attached_user_prompts": [user_prompt.text]
+                "attached_user_prompts": [user_prompt.text],
             }
         else:
             # If the user prompt is primary, check for attached (secondary) user prompts and get their texts
             attached_up_ids = user_prompt.attached_user_prompt_ids
-            attached_ups = UserPrompts.query(sm.select(UserPrompts.text).where(UserPrompts.id.in_(attached_up_ids)))
+            attached_ups = UserPrompts.query(
+                sm.select(UserPrompts.text).where(UserPrompts.id.in_(attached_up_ids))
+            )
             attached_user_prompts = [up["text"] for up in attached_ups]
             matching = {
                 "conv_path_id": conv_path_id,
                 "primary_user_prompt": user_prompt.text,
-                "attached_user_prompts": attached_user_prompts
+                "attached_user_prompts": attached_user_prompts,
             }
         Path(up_to_examples_dir).mkdir(parents=True, exist_ok=True)
         file_path = Path(f"{up_to_examples_dir}/{conv_path_id}.json")
-        file_path.write_text(json.dumps(matching, indent=2, ensure_ascii=False), encoding="utf-8") # ensure_ascii=False to preserve § instead of converting it to \u00a7
+        file_path.write_text(
+            json.dumps(matching, indent=2, ensure_ascii=False), encoding="utf-8"
+        )  # ensure_ascii=False to preserve § instead of converting it to \u00a7
         logging.debug(f"Saved up_to_examples matching to {file_path}")
-
