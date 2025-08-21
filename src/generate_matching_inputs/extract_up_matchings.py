@@ -30,6 +30,7 @@ from src.generate_matching_inputs.utils import (
     CALL_TRANSCRIPTS_DIR,
     process_call_transcript,
     process_matching_json_file,
+    get_outputs_from_conv_path_ids,
 )
 
 
@@ -151,7 +152,11 @@ def extract_prod_outputs(
     """
     logging.info("Extracting baseline matching outputs from call transcripts...")
 
-    seen_ut_matchings = set()
+    all_conv_path_ids = []
+    all_output_file_paths = []
+    outputs = []
+
+    # seen_ut_matchings = set()
 
     start = time.time()
     matching_json_files = [
@@ -187,56 +192,29 @@ def extract_prod_outputs(
             if message["matching"] is None or "conv_path_id" not in message["matching"]:
                 continue
             if message["matching"]["conv_path_id"].startswith(source_node):
-                output = {}
-                output["conv_path_id"] = message["matching"]["conv_path_id"]
-                conv_path = ConversationalPaths.query(
-                    sm.select(
-                        ConversationalPaths.user_prompt_id,
-                        ConversationalPaths.assistant_answer_id,
-                        ConversationalPaths.target_node_id,
-                    ).where(ConversationalPaths.id == message["matching"]["conv_path_id"])
-                )[0]
-                output["up"] = UserPrompts.query(
-                    sm.select(UserPrompts.text).where(UserPrompts.id == conv_path["user_prompt_id"])
-                )[0]["text"]
-                output["aa"] = AssistantAnswers.query(
-                    sm.select(AssistantAnswers.text).where(
-                        AssistantAnswers.id == conv_path["assistant_answer_id"]
-                    )
-                )[0]["text"]
-
-                if (
-                    AssistantQuestions.query(
-                        sm.select(AssistantQuestions.text).where(
-                            AssistantQuestions.id == conv_path["target_node_id"]
-                        )
-                    )
-                    != []
-                ):
-                    output["aq"] = AssistantQuestions.query(
-                        sm.select(AssistantQuestions.text).where(
-                            AssistantQuestions.id == conv_path["target_node_id"]
-                        )
-                    )[0]["text"]
-                else:
-                    output["aq"] = ""
-
-                # save output to .json file
-                output_dir = Path(f"{prod_outputs_dir}/{language}/{assistant_id}/{call_id}")
-                output_dir.mkdir(parents=True, exist_ok=True)
-                output_file_path.write_text(
-                    json.dumps(output, indent=2, ensure_ascii=False), encoding="utf-8"
-                )
-
+                all_conv_path_ids.append(message["matching"]["conv_path_id"])
+                all_output_file_paths.append(output_file_path)
                 break
 
-        # ASUP: check if a same user_text_idx is matched multiple times in different conv_path_ids
-        ut_matching = (language, assistant_id, call_id, matching_id, user_text_idx)
-        if ut_matching not in seen_ut_matchings:
-            logging.info(f"Extracting matching output for {file}")
-            seen_ut_matchings.add(ut_matching)
-            continue
-        logging.debug(f"User text index: {ut_matching} has appeared in more than one matching.")
+        # # ASUP: check if a same user_text_idx is matched multiple times in different conv_path_ids
+        # ut_matching = (language, assistant_id, call_id, matching_id, user_text_idx)
+        # if ut_matching not in seen_ut_matchings:
+        #     logging.info(f"Extracting matching output for {file}")
+        #     seen_ut_matchings.add(ut_matching)
+        #     continue
+        # logging.debug(f"User text index: {ut_matching} has appeared in more than one matching.")
+
+    outputs = get_outputs_from_conv_path_ids(all_conv_path_ids)
+    print(len(outputs))
+
+    for i, output in enumerate(outputs):
+        output_dir = all_output_file_paths[i].parent
+        output_dir.mkdir(parents=True, exist_ok=True)
+        all_output_file_paths[i].write_text(
+            json.dumps(output, indent=2, ensure_ascii=False), encoding="utf-8"
+        )
+
+        logging.info(f"Saved output to {all_output_file_paths[i]}")
 
     logging.info(
         f"Total matching JSON files to process: {len(matching_json_files)}. Took {time.time() - start:.2f} seconds."
@@ -244,14 +222,14 @@ def extract_prod_outputs(
 
 
 if __name__ == "__main__":
-    extract_ut_to_conv_path(
-        ut_to_conv_path_dir="/www/files/up_matching_dataset/inputs/ut_to_conv_path"
-    )
+    # extract_ut_to_conv_path(
+    #     ut_to_conv_path_dir="/www/files/up_matching_dataset/inputs/ut_to_conv_path"
+    # )
 
-    etract_up_to_examples(
-        up_to_examples_dir="/www/files/up_matching_dataset/inputs/up_to_examples",
-        ut_to_conv_path_dir="/www/files/up_matching_dataset/inputs/ut_to_conv_path",
-    )
+    # etract_up_to_examples(
+    #     up_to_examples_dir="/www/files/up_matching_dataset/inputs/up_to_examples",
+    #     ut_to_conv_path_dir="/www/files/up_matching_dataset/inputs/ut_to_conv_path",
+    # )
 
     extract_prod_outputs(
         prod_outputs_dir="/www/files/up_matching_dataset/outputs/prod",
