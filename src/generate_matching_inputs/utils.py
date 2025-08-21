@@ -392,3 +392,62 @@ def process_matching_json_file(up_to_examples_dir: Path, candidates: dict[str, l
             json.dumps(matching, indent=2, ensure_ascii=False), encoding="utf-8"
         )  # ensure_ascii=False to preserve § instead of converting it to \u00a7
         logging.debug(f"Saved up_to_examples matching to {file_path}")
+
+
+def get_outputs_from_conv_path_ids(
+    conv_path_ids: list[str],
+) -> list[dict]:
+    """
+    Get outputs from the database for given conv_path_ids.
+    Return:
+        outputs: list of dictionaries with conv_path_id, up, aa, aq
+    """
+    # Query DB and construct conv_path_id dictionary
+    all_conv_paths = ConversationalPaths.query(
+        sm.select(*ConvPath.columns()).where(ConversationalPaths.id.in_(conv_path_ids))
+    )
+    conv_paths = [ConvPath(**cp) for cp in all_conv_paths]
+    conv_path_id_dict = {
+        cp.id: {"up": cp.user_prompt_id, "aa": cp.assistant_answer_id, "aq": cp.target_node_id}
+        for cp in conv_paths
+    }
+
+    # Get all up, aa, aq ids from all conv_paths then query the DB only once to construct up, aa, aq dictionaries
+    up_ids = []
+    aa_ids = []
+    aq_ids = []
+    for conv_path in conv_paths:
+        up_ids.append(conv_path.user_prompt_id)
+        aa_ids.append(conv_path.assistant_answer_id)
+        aq_ids.append(conv_path.target_node_id)
+
+    ups = UserPrompts.query(
+        sm.select(UserPrompts.id, UserPrompts.text).where(UserPrompts.id.in_(up_ids))
+    )
+    aas = AssistantAnswers.query(
+        sm.select(AssistantAnswers.id, AssistantAnswers.text).where(AssistantAnswers.id.in_(aa_ids))
+    )
+    aqs = AssistantQuestions.query(
+        sm.select(AssistantQuestions.id, AssistantQuestions.text).where(
+            AssistantQuestions.id.in_(aq_ids)
+        )
+    )
+
+    up_dict = {up["id"]: up["text"] for up in ups}
+    aa_dict = {aa["id"]: aa["text"] for aa in aas}
+    aq_dict = {aq["id"]: aq["text"] for aq in aqs}
+
+    # Construct outputs, ensuring that outputs have the same length as the initial conv_path_ids
+    outputs = [
+        {
+            "conv_path_id": conv_path_ids[i],
+            "up": up_dict[conv_path_id_dict[conv_path_ids[i]]["up"]],
+            "aa": aa_dict[conv_path_id_dict[conv_path_ids[i]]["aa"]],
+            "aq": aq_dict[conv_path_id_dict[conv_path_ids[i]]["aq"]]
+            if conv_path_id_dict[conv_path_ids[i]]["aq"] in aq_dict
+            else "",  # aq is optional (may not be present in the DB)
+        }
+        for i in range(len(conv_path_ids))
+    ]
+
+    return outputs

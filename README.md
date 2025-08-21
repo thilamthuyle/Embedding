@@ -76,7 +76,7 @@ up_matching_dataset/
 - Use async functions whenever possible to speed up processing
 
 
-## Notes
+## Notes/ Remarks
 - The dataset contains some noisy entries. 
 
   - There are cases where the `target_node_id` given in the `conv_path_id` but can't be found in the DB, which results in the attribute `aq`being set to `None`. This issue is likely due to dataset refactoring or graph modifications.<br/>
@@ -95,3 +95,6 @@ up_matching_dataset/
       - Not all `attached_user_prompts` point back to the initial `primary_user_prompt`.
       - Some have different `primary_user_prompt` values, introducing inconsistency.
 
+- In the current setting, all matchings are retained for every `call_id` across all assistants, including matchings with the same `conv_path_id`(i.e. those occuring on the same graph, at the same node, and along the same edge). Consequently, assistants with a higher frequency of calls contribute more matchings, leading to a more important presentation of their corresonding `conv_path_id`in the database. Furthermore, even with a single conversational graph, certain `conv_path_id`(or `conv_path`) occur more frequently than others, resulting in an additional imbalance. 
+
+  This observation raises a data construction question: should all duplicate of `conv_path_id` matchings be preserved, thereby allowing frequently occuring paths to exert proportionally greater influence, or should the dataset be restricted to unique `conv_path_id` matchings, thereby normalizing the contribution of each path and assigning them equal importance?
