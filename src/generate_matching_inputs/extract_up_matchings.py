@@ -109,33 +109,6 @@ def etract_up_to_examples(up_to_examples_dir: str, ut_to_conv_path_dir: str):
     )
 
 
-def find_call_transcripts_with_different_consecutive_conv_path_ids(
-    call_transcripts_dir: str = CALL_TRANSCRIPTS_DIR,
-):
-    seen_call_id = set()
-    for assistant_dir in Path(call_transcripts_dir).iterdir():
-        assistant_id = assistant_dir.name
-
-        for call_transcript_path in assistant_dir.iterdir():
-            call_id = Path(call_transcript_path.name).stem
-            all_messages = json.loads(call_transcript_path.read_text(encoding="utf-8"))
-
-            # Find transcripts with 3 consecutive messages with conv_path_id
-            flag = 0
-            for message in all_messages:
-                if message["matching"] is None or "conv_path_id" not in message["matching"]:
-                    flag = 0
-                    continue
-                flag += 1
-                if flag >= 3:
-                    if call_id not in seen_call_id:
-                        logging.info(
-                            f"Found call transcript {call_id} for assistant {assistant_id} with >=3 consecutive messages with conv_path_id {message['matching']['conv_path_id']}"
-                        )
-
-                        seen_call_id.add(call_id)
-
-
 def extract_prod_outputs(
     prod_outputs_dir: str,
     ut_to_conv_path_dir: str,
@@ -155,8 +128,6 @@ def extract_prod_outputs(
     all_conv_path_ids = []
     all_output_file_paths = []
     outputs = []
-
-    # seen_ut_matchings = set()
 
     start = time.time()
     matching_json_files = [
@@ -196,14 +167,6 @@ def extract_prod_outputs(
                 all_output_file_paths.append(output_file_path)
                 break
 
-        # # ASUP: check if a same user_text_idx is matched multiple times in different conv_path_ids
-        # ut_matching = (language, assistant_id, call_id, matching_id, user_text_idx)
-        # if ut_matching not in seen_ut_matchings:
-        #     logging.info(f"Extracting matching output for {file}")
-        #     seen_ut_matchings.add(ut_matching)
-        #     continue
-        # logging.debug(f"User text index: {ut_matching} has appeared in more than one matching.")
-
     outputs = get_outputs_from_conv_path_ids(all_conv_path_ids)
     print(len(outputs))
 
@@ -237,15 +200,4 @@ if __name__ == "__main__":
         call_transcripts_dir=CALL_TRANSCRIPTS_DIR,
     )
 
-    # find_call_transcripts_with_different_consecutive_conv_path_ids(call_transcripts_dir=CALL_TRANSCRIPTS_DIR)
-
-    # Extract user_text_idx from all matching files
-    # user_text_indices = extract_user_text_idx_from_matchings(ut_to_conv_path_dir="/www/files/up_matching_dataset/inputs/ut_to_conv_path")
-    # print(f"Found {len(user_text_indices)} files with user_text_idx")
-    # extract_prod_outputs()
-
-    # process_call_transcript(call_transcript_path=Path("/www/files/call_transcripts/eyMe6oXKrytagjMyDkaC/300011c5-307a-4e2e-a98f-620ce3ef8567.json"),
-    #                         ut_to_conv_path_dir=Path("/www/files/up_matching_dataset/inputs/ut_to_conv_path"),
-    #                         language="nl",
-    #                         assistant_id="eyMe6oXKrytagjMyDkaC",
-    #                         call_id="300011c5-307a-4e2e-a98f-620ce3ef8567")
+    

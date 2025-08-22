@@ -189,7 +189,7 @@ def extract_matching_candidates_from_source_node(
     return candidates
 
 
-def check_normalized_text_matching(ut_query: str, user_prompt_id: str) -> bool:
+def is_normalized_text_matching(ut_query: str, user_prompt_id: str) -> bool:
     """
     Check exact matching between user text and user prompt ID.
         - if user prompt is secondary, compare user prompt's text with user text
@@ -267,7 +267,8 @@ def process_call_transcript(
     )
 
     conversation = []
-    seen_conv_path_ids = set()
+    seen_conv_path_ids = set()  # To ensure that each conv_path_id is processed only once
+    seen_user_text_idxs = set() # To ensure that each user_text_idx is processed only once
     user_text_idx = -1
 
     matching_id = 0
@@ -290,7 +291,7 @@ def process_call_transcript(
         except Exception:
             continue
 
-        # Get user_text from the last USER message before the current ASSISTANT message with matching
+        # Get user_text from the last USER message prior to the current ASSISTANT message with matching
         user_text = all_messages[user_text_idx]["text"]  # live transcription
         try:
             user_text = all_messages[user_text_idx]["matching"]["original"]  # offline transcription
@@ -299,17 +300,16 @@ def process_call_transcript(
 
         # Skip exact matching
         conv_path = depth2_conv_paths_by_ids_dict.get(conv_path_id)
-        if message.matching.distance == 0.0 and check_normalized_text_matching(
+        if message.matching.distance == 0.0 and is_normalized_text_matching(
             user_text, conv_path.user_prompt_id
         ):
             continue
 
-        # Extract possible conv_paths from source_node as matching candidates
+        # Extract candidate conv_paths from source_node,
+        # while filtering out user prompt candidates containing §NO_NEED*§
         candidates = extract_matching_candidates_from_source_node(
             conv_path.source_node_id, conv_paths_from_source_nodes_dict
         )
-
-        # Remove matchings with §NO_NEED§ in user prompt candidates
         if not candidates:
             logging.debug(
                 f"Remove matching with §NO_NEED§ user prompt candidate in {call_transcript_path}"
@@ -394,6 +394,33 @@ def process_matching_json_file(up_to_examples_dir: Path, candidates: dict[str, l
         logging.debug(f"Saved up_to_examples matching to {file_path}")
 
 
+def find_call_transcripts_with_different_consecutive_conv_path_ids(
+    call_transcripts_dir: str = CALL_TRANSCRIPTS_DIR,
+):
+    seen_call_id = set()
+    for assistant_dir in Path(call_transcripts_dir).iterdir():
+        assistant_id = assistant_dir.name
+
+        for call_transcript_path in assistant_dir.iterdir():
+            call_id = Path(call_transcript_path.name).stem
+            all_messages = json.loads(call_transcript_path.read_text(encoding="utf-8"))
+
+            # Find transcripts with 3 consecutive messages with conv_path_id
+            flag = 0
+            for message in all_messages:
+                if message["matching"] is None or "conv_path_id" not in message["matching"]:
+                    flag = 0
+                    continue
+                flag += 1
+                if flag >= 3:
+                    if call_id not in seen_call_id:
+                        logging.info(
+                            f"Found call transcript {call_id} for assistant {assistant_id} with >=3 consecutive messages with conv_path_id {message['matching']['conv_path_id']}"
+                        )
+
+                        seen_call_id.add(call_id)
+
+
 def get_outputs_from_conv_path_ids(
     conv_path_ids: list[str],
 ) -> list[dict]:
@@ -451,3 +478,14 @@ def get_outputs_from_conv_path_ids(
     ]
 
     return outputs
+
+
+
+if __name__ == "__main__":
+    find_call_transcripts_with_different_consecutive_conv_path_ids(call_transcripts_dir=CALL_TRANSCRIPTS_DIR)
+
+    # process_call_transcript(call_transcript_path=Path("/www/files/call_transcripts/eyMe6oXKrytagjMyDkaC/300011c5-307a-4e2e-a98f-620ce3ef8567.json"),
+    #                         ut_to_conv_path_dir=Path("/www/files/up_matching_dataset/inputs/ut_to_conv_path"),
+    #                         language="nl",
+    #                         assistant_id="eyMe6oXKrytagjMyDkaC",
+    #                         call_id="300011c5-307a-4e2e-a98f-620ce3ef8567")
