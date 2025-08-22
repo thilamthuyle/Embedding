@@ -290,6 +290,16 @@ def process_call_transcript(
                 continue
         except Exception:
             continue
+        
+        # Skip if the user text index has been previously matched
+        # This is to match user text to only the first assistant message with conv_path_id when there
+        # are multiple assistant messages with different conv_path_ids following the same user text
+        if user_text_idx in seen_user_text_idxs:
+            logging.debug(
+                f"Different matched conv_path_ids detected after user text index {user_text_idx} for assistant {assistant_id} and call {call_id}."
+            )
+            continue
+        seen_user_text_idxs.add(user_text_idx)
 
         # Get user_text from the last USER message prior to the current ASSISTANT message with matching
         user_text = all_messages[user_text_idx]["text"]  # live transcription
