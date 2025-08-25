@@ -408,6 +408,8 @@ def find_call_transcripts_with_different_consecutive_conv_path_ids(
     call_transcripts_dir: str = CALL_TRANSCRIPTS_DIR,
 ):
     seen_call_id = set()
+    count = 0
+    logging.info("Start searching for call transcripts with at least 3 consecutive messages with conv_path_id...")
     for assistant_dir in Path(call_transcripts_dir).iterdir():
         assistant_id = assistant_dir.name
 
@@ -425,11 +427,12 @@ def find_call_transcripts_with_different_consecutive_conv_path_ids(
                 if flag >= 3:
                     if call_id not in seen_call_id:
                         logging.info(
-                            f"Found call transcript {call_id} for assistant {assistant_id} with >=3 consecutive messages with conv_path_id {message['matching']['conv_path_id']}"
+                            f"Found call transcript {call_id} for assistant {assistant_id} with conv_path_id {message['matching']['conv_path_id']}"
                         )
-
+                        count += 1
                         seen_call_id.add(call_id)
-
+    logging.info(f"Found {count} call transcripts in total.")
+    
 
 def get_outputs_from_conv_path_ids(
     conv_path_ids: list[str],

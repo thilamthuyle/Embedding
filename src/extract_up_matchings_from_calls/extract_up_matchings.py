@@ -18,16 +18,11 @@ import concurrent.futures
 import time
 import sys
 
-import sqlmodel as sm
-from getvocal.datamodel.sql.conversational_paths import ConversationalPaths
-from getvocal.datamodel.sql.user_prompts import UserPrompts
-from getvocal.datamodel.sql.assistant_questions import AssistantQuestions
-from getvocal.datamodel.sql.assistant_answers import AssistantAnswers
 
 sys.path.insert(0, "/www/Embedding")
-from src.generate_matching_inputs.utils import (
-    get_assistant_language,
+from src.extract_up_matchings_from_calls.utils import (
     CALL_TRANSCRIPTS_DIR,
+    get_assistant_language,
     process_call_transcript,
     process_matching_json_file,
     get_outputs_from_conv_path_ids,
@@ -38,8 +33,15 @@ def extract_ut_to_conv_path(
     ut_to_conv_path_dir: str, call_transcripts_dir: str = CALL_TRANSCRIPTS_DIR
 ):
     """
-    Walk through all call transcripts and extract user prompt matchings using multiprocessing.
-    Saves the results into JSON files.
+    Generate `ut_to_conv_path` dataset.
+
+    This function walks through all call transcripts and extracts user prompt matchings using multiprocessing.
+    For each call transcript, it identifies user prompts and their corresponding conversational path candidates,
+    and saves the extracted matchings into structured JSON files.
+
+    Args:
+        ut_to_conv_path_dir (str): Directory where ut_to_conv_path files will be saved.
+        call_transcripts_dir (str): Directory containing the original call transcript files.
     """
     start = time.time()
     arguments_list = []
@@ -84,7 +86,18 @@ def extract_ut_to_conv_path(
     )
 
 
-def etract_up_to_examples(up_to_examples_dir: str, ut_to_conv_path_dir: str):
+def extract_up_to_examples(ut_to_conv_path_dir: str, up_to_examples_dir: str):
+    """
+    Generate `up_to_examples` dataset.
+
+    This function iterates through all candidates in all matching JSON files in the ut_to_conv_path dataset.
+    For each candidate, it examines the candidates' conv_path_id and specifically the user_prompt within that conv_path_id.
+    If the user prompt is a primary one, it finds and collects all examples for that user prompt.
+
+    Args:
+        up_to_examples_dir (str): Directory where up_to_example files will be saved.
+        ut_to_conv_path_dir (str): Directory containing matching JSON files to process.
+    """
     start = time.time()
     logging.info("Preparing arguments list for generating up_to_examples...")
     arguments_list = []
@@ -115,13 +128,18 @@ def extract_prod_outputs(
     call_transcripts_dir: str = CALL_TRANSCRIPTS_DIR,
 ):
     """
-    Walk through all matching JSON files in ut_to_conv_path_dir and extract baseline matching output.
-    The output is extracted from the first conv_path_id that appears after user_text_idx in the conversation
-    and whose source node matches the source node of all candidates in the matching JSON file.
+    Generates production output dataset containing the current matching outputs from call transcripts.
+    These outputs serve as a baseline for future improvements.
+
+    This function iterates through all matching JSON files in 'ut_to_conv_path_dir', extracting relevant information such as 
+    `user_text_idx` and `candidates`. For each matching, it determines the output by finding the first `conv_path_id` in the 
+    call transcript that appears after the `user_text_idx` and shares the same source node as all candidates. The extracted 
+    outputs are then saved in the specified 'prod_outputs_dir'.
+
     Args:
-        prod_outputs_dir: directory where the baseline matching outputs will be saved.
-        ut_to_conv_path_dir: directory containing the matching JSON files to process.
-        call_transcripts_dir: directory containing the original call transcript files.
+        prod_outputs_dir (str): Directory where the baseline matching outputs will be saved.
+        ut_to_conv_path_dir (str): Directory containing the matching JSON files to process.
+        call_transcripts_dir (str): Directory containing the original call transcript files.
     """
     logging.info("Extracting baseline matching outputs from call transcripts...")
 
@@ -190,8 +208,8 @@ if __name__ == "__main__":
     # )
 
     # etract_up_to_examples(
-    #     up_to_examples_dir="/www/files/up_matching_dataset/inputs/up_to_examples",
     #     ut_to_conv_path_dir="/www/files/up_matching_dataset/inputs/ut_to_conv_path",
+    #     up_to_examples_dir="/www/files/up_matching_dataset/inputs/up_to_examples",
     # )
 
     extract_prod_outputs(
